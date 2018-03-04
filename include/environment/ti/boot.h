@@ -18,6 +18,19 @@
 #define PARTS_DEFAULT
 #endif
 
+#if defined(CONFIG_CMD_AVB)
+#define AVB_VERIFY_CHECK "if run avb_verify; then " \
+				"echo AVB verification OK.;" \
+				"set bootargs $bootargs $avb_bootargs;" \
+			"else " \
+				"echo AVB verification failed.;" \
+			"exit; fi;"
+#define AVB_VERIFY_CMD "avb_verify=avb init 1; avb verify;\0"
+#else
+#define AVB_VERIFY_CHECK ""
+#define AVB_VERIFY_CMD ""
+#endif
+
 #define DEFAULT_COMMON_BOOT_TI_ARGS \
 	"console=" CONSOLEDEV ",115200n8\0" \
 	"fdtfile=undefined\0" \
@@ -26,6 +39,7 @@
 	"bootfile=zImage\0" \
 	"usbtty=cdc_acm\0" \
 	"vram=16M\0" \
+	AVB_VERIFY_CMD \
 	"partitions=" PARTS_DEFAULT "\0" \
 	"optargs=\0" \
 	"dofastboot=0\0" \
@@ -43,6 +57,7 @@
 		"setenv machid fe6; " \
 		"mmc dev $mmcdev; " \
 		"mmc rescan; " \
+		AVB_VERIFY_CHECK \
 		"part start mmc ${mmcdev} environment fdt_start; " \
 		"part size mmc ${mmcdev} environment fdt_size; " \
 		"part start mmc ${mmcdev} boot boot_start; " \
