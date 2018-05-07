@@ -349,7 +349,7 @@ OBJDUMP		= $(CROSS_COMPILE)objdump
 AWK		= awk
 PERL		= perl
 PYTHON		?= python
-DTC		?= $(objtree)/scripts/dtc/dtc
+DTC		?= dtc
 CHECK		= sparse
 
 CHECKFLAGS     := -D__linux__ -Dlinux -D__STDC__ -Dunix -D__unix__ \
@@ -896,7 +896,7 @@ endif
 PHONY += dtbs
 dtbs: dts/dt.dtb
 	@:
-dts/dt.dtb: u-boot
+dts/dt.dtb: checkdtc u-boot
 	$(Q)$(MAKE) $(build)=dts dtbs
 
 quiet_cmd_copy = COPY    $@
@@ -1525,6 +1525,12 @@ SYSTEM_MAP = \
 		LC_ALL=C sort
 System.map:	u-boot
 		@$(call SYSTEM_MAP,$<) > $@
+
+checkdtc:
+	@if test $(call dtc-version) -lt 010403; then \
+		echo '*** Your dtc is too old, please upgrade to dtc 1.4.3 or newer'; \
+		false; \
+	fi
 
 #########################################################################
 

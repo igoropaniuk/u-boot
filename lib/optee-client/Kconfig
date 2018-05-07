@@ -1,0 +1,4 @@
+config OPTEE_CLIENT
+	bool "OPTEE portable client"
+	help
+	  Some description here
