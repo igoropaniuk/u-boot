@@ -38,6 +38,7 @@ static struct mm_region poplar_mem_map[] = {
 
 struct mm_region *mem_map = poplar_mem_map;
 
+#if !CONFIG_IS_ENABLED(OF_CONTROL)
 static const struct pl01x_serial_platdata serial_platdata = {
 	.base = REG_BASE_UART0,
 	.type = TYPE_PL010,
@@ -48,6 +49,7 @@ U_BOOT_DEVICE(poplar_serial) = {
 	.name = "serial_pl01x",
 	.platdata = &serial_platdata,
 };
+#endif
 
 
 int misc_init_r(void)

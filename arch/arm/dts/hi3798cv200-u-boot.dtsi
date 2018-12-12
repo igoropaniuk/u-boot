@@ -17,12 +17,7 @@
 };
 
 &uart0 {
+	clock = <75000000>;
+	status = "okay";
 	status = "disabled";
 };
-
-/{
-	chosen {
-		stdout-path = "";
-	};
-};
-
