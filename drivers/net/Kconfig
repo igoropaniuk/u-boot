@@ -495,4 +495,10 @@ config TSEC_ENET
 	  This driver implements support for the (Enhanced) Three-Speed
 	  Ethernet Controller found on Freescale SoCs.
 
+config NET_HIGMACV300
+	select LIB_RAND
+	bool "Hisilicon Gigabit Controller"
+	help
+	  This driver provides Hisilicon SoCs network support
+
 endif # NETDEVICES

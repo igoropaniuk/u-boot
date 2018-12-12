@@ -63,6 +63,7 @@ obj-$(CONFIG_VSC7385_ENET) += vsc7385.o
 obj-$(CONFIG_XILINX_AXIEMAC) += xilinx_axi_emac.o
 obj-$(CONFIG_XILINX_EMACLITE) += xilinx_emaclite.o
 obj-$(CONFIG_ZYNQ_GEM) += zynq_gem.o
+obj-$(CONFIG_NET_HIGMACV300) += higmacv300/
 obj-$(CONFIG_FSL_MC_ENET) += fsl-mc/
 obj-$(CONFIG_FSL_MC_ENET) += ldpaa_eth/
 obj-$(CONFIG_FSL_MEMAC) += fm/memac_phy.o
