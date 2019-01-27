@@ -5,6 +5,7 @@
 #include <common.h>
 #include <dm.h>
 #include <sandboxtee.h>
+#include <search.h>
 #include <tee.h>
 #include <tee/optee_ta_avb.h>
 
@@ -61,6 +62,8 @@ bad_params:
 
 static u64 ta_avb_rollback_indexes[TA_AVB_MAX_ROLLBACK_LOCATIONS];
 static u32 ta_avb_lock_state;
+static struct hsearch_data pstorage_htab;
+static const u32 pstorage_max = 16;
 
 static u32 ta_avb_open_session(uint num_params, struct tee_param *params)
 {
@@ -76,9 +79,13 @@ static u32 ta_avb_open_session(uint num_params, struct tee_param *params)
 static u32 ta_avb_invoke_func(u32 func, uint num_params,
 			      struct tee_param *params)
 {
+	ENTRY e, *ep;
+	char *name;
 	u32 res;
 	uint slot;
 	u64 val;
+	char *value;
+	u32 value_sz;
 
 	switch (func) {
 	case TA_AVB_CMD_READ_ROLLBACK_INDEX:
@@ -149,6 +156,57 @@ static u32 ta_avb_invoke_func(u32 func, uint num_params,
 			memset(ta_avb_rollback_indexes, 0,
 			       sizeof(ta_avb_rollback_indexes));
 		}
+
+		return TEE_SUCCESS;
+	case TA_AVB_CMD_READ_PERSIST_VALUE:
+		res = check_params(TEE_PARAM_ATTR_TYPE_MEMREF_INPUT,
+				   TEE_PARAM_ATTR_TYPE_MEMREF_INOUT,
+				   TEE_PARAM_ATTR_TYPE_NONE,
+				   TEE_PARAM_ATTR_TYPE_NONE,
+				   num_params, params);
+		if (res)
+			return res;
+
+		name = params[0].u.memref.shm->addr;
+
+		value = params[1].u.memref.shm->addr;
+		value_sz = params[1].u.memref.size;
+
+		e.key = name;
+		e.data = NULL;
+		hsearch_r(e, FIND, &ep, &pstorage_htab, 0);
+		if (!ep)
+			return TEE_ERROR_ITEM_NOT_FOUND;
+
+		value_sz = strlen(ep->data);
+		memcpy(value, ep->data, value_sz);
+
+		return TEE_SUCCESS;
+	case TA_AVB_CMD_WRITE_PERSIST_VALUE:
+		res = check_params(TEE_PARAM_ATTR_TYPE_MEMREF_INPUT,
+				   TEE_PARAM_ATTR_TYPE_MEMREF_INPUT,
+				   TEE_PARAM_ATTR_TYPE_NONE,
+				   TEE_PARAM_ATTR_TYPE_NONE,
+				   num_params, params);
+		if (res)
+			return res;
+
+		name = params[0].u.memref.shm->addr;
+
+		value = params[1].u.memref.shm->addr;
+		value_sz = params[1].u.memref.size;
+
+		e.key = name;
+		e.data = NULL;
+		hsearch_r(e, FIND, &ep, &pstorage_htab, 0);
+		if (ep)
+			hdelete_r(e.key, &pstorage_htab, 0);
+
+		e.key = name;
+		e.data = value;
+		hsearch_r(e, ENTER, &ep, &pstorage_htab, 0);
+		if (!ep)
+			return TEE_ERROR_OUT_OF_MEMORY;
 
 		return TEE_SUCCESS;
 
@@ -285,6 +343,26 @@ static int sandbox_tee_shm_unregister(struct udevice *dev, struct tee_shm *shm)
 	return 0;
 }
 
+static int sandbox_tee_remove(struct udevice *dev)
+{
+	hdestroy_r(&pstorage_htab);
+
+	return 0;
+}
+
+static int sandbox_tee_probe(struct udevice *dev)
+{
+	/*
+	 * With this hastable we emulate persistent storage,
+	 * which should contain persistent values
+	 * between different sessions/command invocations.
+	 */
+	if (!hcreate_r(pstorage_max, &pstorage_htab))
+		return TEE_ERROR_OUT_OF_MEMORY;
+
+	return 0;
+}
+
 static const struct tee_driver_ops sandbox_tee_ops = {
 	.get_version = sandbox_tee_get_version,
 	.open_session = sandbox_tee_open_session,
@@ -305,4 +383,6 @@ U_BOOT_DRIVER(sandbox_tee) = {
 	.of_match = sandbox_tee_match,
 	.ops = &sandbox_tee_ops,
 	.priv_auto_alloc_size = sizeof(struct sandbox_tee_state),
+	.probe = sandbox_tee_probe,
+	.remove = sandbox_tee_remove,
 };
