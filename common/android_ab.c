@@ -3,9 +3,9 @@
  * Copyright (C) 2017 The Android Open Source Project
  */
 
-#include <common.h>
 #include <android_ab.h>
 #include <android_bl_msg.h>
+#include <common.h>
 #include <memalign.h>
 #include <u-boot/crc.h>
 
@@ -27,7 +27,7 @@ static uint32_t ab_control_compute_crc(struct andr_bl_control *abc)
  * should be used when the bootloader message is corrupted, but not when
  * a valid message indicates that all slots are unbootable.
  */
-static void ab_control_default(struct andr_bl_control *abc)
+static int ab_control_default(struct andr_bl_control *abc)
 {
 	int i;
 	const struct andr_slot_metadata metadata = {
@@ -37,6 +37,9 @@ static void ab_control_default(struct andr_bl_control *abc)
 		.verity_corrupted = 0,
 		.reserved = 0
 	};
+
+	if (!abc)
+		return -EINVAL;
 
 	memcpy(abc->slot_suffix, "a\0\0\0", 4);
 	abc->magic = ANDROID_BOOT_CTRL_MAGIC;
@@ -48,6 +51,8 @@ static void ab_control_default(struct andr_bl_control *abc)
 
 	memset(abc->reserved1, 0, sizeof(abc->reserved1));
 	abc->crc32_le = ab_control_compute_crc(abc);
+
+	return 0;
 }
 
 /**
@@ -96,7 +101,9 @@ static int ab_control_create_from_disk(struct blk_desc *dev_desc,
 		free(*abc);
 		return -EIO;
 	}
+
 	log_debug("ANDROID: Loaded ABC, %lu blocks\n", abc_blocks);
+
 	return 0;
 }
 
@@ -181,7 +188,12 @@ int ab_select_slot(struct blk_desc *dev_desc, disk_partition_t *part_info)
 		printf("ANDROID: Invalid CRC-32 (expected %.8x, found %.8x), ",
 		       crc32_le, abc->crc32_le);
 		printf("re-initializing A/B metadata.\n");
-		ab_control_default(abc);
+
+		ret = ab_control_default(abc);
+		if (ret < 0) {
+			free(abc);
+			return -ENODATA;
+		}
 		store_needed = true;
 	}
 
