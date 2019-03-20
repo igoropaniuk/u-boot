@@ -64,8 +64,12 @@ int sc_pm_get_clock_rate(sc_ipc_t ipc, sc_rsrc_t resource, sc_pm_clk_t clk,
 			 sc_pm_clock_rate_t *rate);
 int sc_pm_clock_enable(sc_ipc_t ipc, sc_rsrc_t resource, sc_pm_clk_t clk,
 		       sc_bool_t enable, sc_bool_t autog);
+int sc_pm_set_clock_parent(sc_ipc_t ipc, sc_rsrc_t resource, sc_pm_clk_t clk,
+			sc_pm_clk_parent_t parent);
 
 /* MISC API */
+int sc_misc_set_control(sc_ipc_t ipc, sc_rsrc_t resource,
+			sc_ctrl_t ctrl, u32 val);
 int sc_misc_get_control(sc_ipc_t ipc, sc_rsrc_t resource, sc_ctrl_t ctrl,
 			u32 *val);
 void sc_misc_get_boot_dev(sc_ipc_t ipc, sc_rsrc_t *boot_dev);
