@@ -66,10 +66,10 @@
 
 #include <common.h>
 #include <fdtdec.h>
-#include <version.h>
 #include <malloc.h>
-#include <video.h>
 #include <linux/compiler.h>
+#include <version.h>
+#include <video.h>
 
 #if defined(CONFIG_VIDEO_MXS)
 #define VIDEO_FB_16BPP_WORD_SWAP
@@ -227,7 +227,6 @@ void console_cursor(int state);
 
 DECLARE_GLOBAL_DATA_PTR;
 
-/* Locals */
 static GraphicDevice *pGD;	/* Pointer to Graphic array */
 
 static void *video_fb_address;	/* frame buffer address */
@@ -1997,10 +1996,11 @@ defined(CONFIG_SANDBOX) || defined(CONFIG_X86)
 	return 0;
 }
 
-void video_clear(void)
+#ifndef CONFIG_DM_VIDEO
+int video_clear(struct udevice *dev)
 {
 	if (!video_fb_address)
-		return;
+		return -1;
 #ifdef VIDEO_HW_RECTFILL
 	video_hw_rectfill(VIDEO_PIXEL_SIZE,	/* bytes per pixel */
 			  0,			/* dest pos x */
@@ -2013,15 +2013,22 @@ void video_clear(void)
 	memsetl(video_fb_address,
 		(VIDEO_VISIBLE_ROWS * VIDEO_LINE_LEN) / sizeof(int), bgx);
 #endif
-}
+	return 0;
 
-static int cfg_video_init(void)
+}
+#endif
+
+static int cfg_video_init(GraphicDevice *panel)
 {
 	unsigned char color8;
 
-	pGD = video_hw_init();
-	if (pGD == NULL)
-		return -1;
+	if (panel) {
+		pGD = panel;
+	} else {
+		pGD = video_hw_init();
+		if (pGD == NULL)
+			return -1;
+	}
 
 	video_fb_address = (void *) VIDEO_FB_ADRS;
 
@@ -2100,8 +2107,10 @@ static int cfg_video_init(void)
 	}
 	eorx = fgx ^ bgx;
 
+#ifndef CONFIG_DM_VIDEO
 	if (!CONFIG_IS_ENABLED(NO_FB_CLEAR))
-		video_clear();
+		video_clear(NULL);
+#endif
 
 #ifdef CONFIG_VIDEO_LOGO
 	/* Plot the logo and get start point of console */
@@ -2131,7 +2140,7 @@ __weak int board_video_skip(void)
 	return 0;
 }
 
-int drv_video_init(void)
+int drv_video_init(void *panel)
 {
 	struct stdio_dev console_dev;
 	bool have_keyboard;
@@ -2142,7 +2151,7 @@ int drv_video_init(void)
 		return 0;
 
 	/* Init video chip - returns with framebuffer cleared */
-	if (cfg_video_init() == -1)
+	if (cfg_video_init((GraphicDevice *)panel) == -1)
 		return 0;
 
 	if (board_cfb_skip())

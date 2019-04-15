@@ -3,25 +3,34 @@
  * Freescale i.MX23/i.MX28 LCDIF driver
  *
  * Copyright (C) 2011-2013 Marek Vasut <marex@denx.de>
+ * Copyright (C) 2019 Toradex AG
  */
-#include <common.h>
-#include <malloc.h>
-#include <video_fb.h>
 
 #include <asm/arch/imx-regs.h>
 #include <asm/arch/clock.h>
 #include <asm/arch/sys_proto.h>
-#include <linux/errno.h>
 #include <asm/io.h>
-
 #include <asm/mach-imx/dma.h>
+#include <common.h>
+#include <dm.h>
+#include <linux/errno.h>
+#include <malloc.h>
+#include <video_fb.h>
 
 #include "videomodes.h"
 
 #define	PS2KHZ(ps)	(1000000000UL / (ps))
 
+#ifndef CONFIG_DM_VIDEO
+/* for backward compatibility */
 static GraphicDevice panel;
 struct mxs_dma_desc desc;
+#else
+struct mxsfb_priv {
+	GraphicDevice panel;
+	struct mxs_dma_desc desc;
+};
+#endif
 
 /**
  * mxsfb_system_setup() - Fine-tune LCDIF configuration
@@ -135,8 +144,8 @@ void lcdif_power_down(void)
 	struct mxs_lcdif_regs *regs = (struct mxs_lcdif_regs *)MXS_LCDIF_BASE;
 	int timeout = 1000000;
 
-	if (!panel.frameAdrs)
-		return;
+	/*if (!panel.frameAdrs)
+		return; */
 
 	writel(panel.frameAdrs, &regs->hw_lcdif_cur_buf_reg);
 	writel(panel.frameAdrs, &regs->hw_lcdif_next_buf_reg);
@@ -150,7 +159,7 @@ void lcdif_power_down(void)
 	mxs_reset_block((struct mxs_register_32 *)&regs->hw_lcdif_ctrl_reg);
 }
 
-void *video_hw_init(void)
+void *video_hw_init(GraphicDevice *panel)
 {
 	int bpp = -1;
 	char *penv;
@@ -172,49 +181,49 @@ void *video_hw_init(void)
 	sprintf(panel.modeIdent, "%dx%dx%d",
 			mode.xres, mode.yres, bpp);
 
-	panel.winSizeX = mode.xres;
-	panel.winSizeY = mode.yres;
-	panel.plnSizeX = mode.xres;
-	panel.plnSizeY = mode.yres;
+	panel->winSizeX = mode.xres;
+	panel->winSizeY = mode.yres;
+	panel->plnSizeX = mode.xres;
+	panel->plnSizeY = mode.yres;
 
 	switch (bpp) {
 	case 24:
 	case 18:
-		panel.gdfBytesPP = 4;
-		panel.gdfIndex = GDF_32BIT_X888RGB;
+		panel->gdfBytesPP = 4;
+		panel->gdfIndex = GDF_32BIT_X888RGB;
 		break;
 	case 16:
-		panel.gdfBytesPP = 2;
-		panel.gdfIndex = GDF_16BIT_565RGB;
+		panel->gdfBytesPP = 2;
+		panel->gdfIndex = GDF_16BIT_565RGB;
 		break;
 	case 8:
-		panel.gdfBytesPP = 1;
-		panel.gdfIndex = GDF__8BIT_INDEX;
+		panel->gdfBytesPP = 1;
+		panel->gdfIndex = GDF__8BIT_INDEX;
 		break;
 	default:
 		printf("MXSFB: Invalid BPP specified! (bpp = %i)\n", bpp);
 		return NULL;
 	}
 
-	panel.memSize = mode.xres * mode.yres * panel.gdfBytesPP;
+	panel->memSize = mode.xres * mode.yres * panel->gdfBytesPP;
 
 	/* Allocate framebuffer */
 	fb = memalign(ARCH_DMA_MINALIGN,
-		      roundup(panel.memSize, ARCH_DMA_MINALIGN));
+		      roundup(panel->memSize, ARCH_DMA_MINALIGN));
 	if (!fb) {
 		printf("MXSFB: Error allocating framebuffer!\n");
 		return NULL;
 	}
 
 	/* Wipe framebuffer */
-	memset(fb, 0, panel.memSize);
+	memset(fb, 0, panel->memSize);
 
-	panel.frameAdrs = (u32)fb;
+	panel->frameAdrs = (u32)fb;
 
-	printf("%s\n", panel.modeIdent);
+	printf("%s\n", panel->modeIdent);
 
 	/* Start framebuffer */
-	mxs_lcd_init(&panel, &mode, bpp);
+	mxs_lcd_init(panel, &mode, bpp);
 
 #ifdef CONFIG_VIDEO_MXS_MODE_SYSTEM
 	/*
@@ -239,5 +248,36 @@ void *video_hw_init(void)
 	mxs_dma_circ_start(MXS_DMA_CHANNEL_AHB_APBH_LCDIF, &desc);
 #endif
 
-	return (void *)&panel;
+	return (void *)panel;
 }
+
+static int mxsfb_probe(struct udevice *dev)
+{
+	struct mxsfb_priv *priv = dev_get_priv(dev);
+
+	debug("%s: Probing i.MX23/i.MX28 LCDIF device\n", __func__);
+
+
+	priv->panel = video_hw_init(priv->panel);
+	if (priv->panel == NULL)
+		return -1;
+
+	drv_video_init(priv->panel);
+
+	return 0;
+}
+
+static const struct udevice_id mxsfb_ids[] = {
+	{ .compatible = "fsl,imx23-lcdif", .data = &mxsfb_devtype[0], },
+	{ .compatible = "fsl,imx28-lcdif", .data = &mxsfb_devtype[1], },
+	{ .compatible = "fsl,imx7ulp-lcdif", .data = &mxsfb_devtype[2], },
+	{ /* sentinel */ }
+};
+
+U_BOOT_DRIVER(mxsfb) = {
+	.name		= "mxsfb",
+	.id		= UCLASS_VIDEO,
+	.of_match	= udevice_id_mxsfb_ids,
+	.probe		= mxsfb_probe,
+	.priv_auto_alloc_size = sizeof(struct mxsfb_priv),
+};

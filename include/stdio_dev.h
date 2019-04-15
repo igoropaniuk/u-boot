@@ -94,8 +94,8 @@ struct stdio_dev* stdio_clone(struct stdio_dev *dev);
 #ifdef CONFIG_LCD
 int	drv_lcd_init (void);
 #endif
-#if defined(CONFIG_VIDEO) || defined(CONFIG_CFB_CONSOLE)
-int	drv_video_init (void);
+#if defined(CONFIG_VIDEO) || defined(CONFIG_CFB_CONSOLE) || defined(DM_VIDEO)
+int	drv_video_init (void *panel);
 #endif
 #ifdef CONFIG_KEYBOARD
 int	drv_keyboard_init (void);

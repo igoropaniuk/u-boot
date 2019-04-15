@@ -95,6 +95,9 @@ static void setup_gpmi_nand(void)
 }
 #endif
 
+#define GPIO_BL_ON IMX_GPIO_NR(5, 1)
+#define GPIO_PWM_A IMX_GPIO_NR(1, 8)
+
 #ifdef CONFIG_VIDEO_MXS
 static iomux_v3_cfg_t const lcd_pads[] = {
 	MX7D_PAD_LCD_CLK__LCD_CLK | MUX_PAD_CTRL(LCD_PAD_CTRL),
@@ -129,8 +132,6 @@ static iomux_v3_cfg_t const backlight_pads[] = {
 	MX7D_PAD_ECSPI2_MOSI__GPIO4_IO21 | MUX_PAD_CTRL(NO_PAD_CTRL),
 };
 
-#define GPIO_BL_ON IMX_GPIO_NR(5, 1)
-#define GPIO_PWM_A IMX_GPIO_NR(1, 8)
 
 static int setup_lcd(void)
 {

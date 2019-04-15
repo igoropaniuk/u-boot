@@ -551,8 +551,8 @@ config VIDEO
 
 config CFB_CONSOLE
 	bool "Enable colour frame buffer console"
-	depends on VIDEO
-	default y if VIDEO
+	depends on VIDEO || DM_VIDEO
+	default y if VIDEO || DM_VIDEO
 	help
 	  Enables the colour frame buffer driver. This supports colour
 	  output on a bitmap display from an in-memory frame buffer.
