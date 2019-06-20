@@ -169,8 +169,8 @@ On the client side you can fetch the bootloader version for instance:
 
 ::
 
-   $ fastboot getvar bootloader-version
-   bootloader-version: U-Boot 2014.04-00005-gd24cabc
+   $ fastboot getvar version-bootloader
+   version-bootloader: U-Boot 2014.04-00005-gd24cabc
    finished. total time: 0.000s
 
 or initiate a reboot:
