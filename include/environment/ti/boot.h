@@ -126,13 +126,44 @@
 		"if test $fdtfile = undefined; then " \
 			"echo WARNING: Could not determine device tree to use; fi; \0"
 
-#define CONFIG_PREBOOT \
+#define FASTBOOT_CMD \
+	"echo Booting into fastboot ...; " \
+	"fastboot " __stringify(CONFIG_FASTBOOT_USB_DEV) "; "
+
+/* Check we are booting from "fastboot reboot bootloader" */
+#define PREBOOT_CHECK_DOFASTBOOT \
 	"if test ${dofastboot} -eq 1; then " \
-		"echo Boot fastboot requested, resetting dofastboot ...;" \
-		"setenv dofastboot 0; saveenv;" \
-		"echo Booting into fastboot ...; " \
-		"fastboot " __stringify(CONFIG_FASTBOOT_USB_DEV) "; " \
-	"fi;" \
+		"echo Boot fastboot requested, resetting dofastboot ...; " \
+		"setenv dofastboot 0; saveenv; " \
+		FASTBOOT_CMD \
+	"fi; "
+
+/* Check reboot reason in BCB area of 'misc' partition */
+#define PREBOOT_CHECK_BCB \
+	"if bcb load " __stringify(CONFIG_FASTBOOT_FLASH_MMC_DEV) " misc; " \
+	"then " \
+		"if bcb test command = bootonce-bootloader; then " \
+			"echo Boot fastboot requested, resetting BCB ...; " \
+			"bcb clear command; bcb store; " \
+			FASTBOOT_CMD \
+		"elif bcb test command = boot-recovery; then " \
+			"echo Boot recovery requested; resetting BCB ...; " \
+			"bcb clear command; bcb store; " \
+			"echo TODO: RECOVERY_CMD is not implemented; " \
+		"fi; " \
+	"else " \
+		"echo Error: BCB/misc is corrupted or does not exist; " \
+	"fi; "
+
+/* Enter fastboot mode if user requested it */
+#if CONFIG_IS_ENABLED(CMD_BCB)
+# define CONFIG_PREBOOT \
+	PREBOOT_CHECK_DOFASTBOOT \
+	PREBOOT_CHECK_BCB
+#else
+# define CONFIG_PREBOOT \
+	PREBOOT_CHECK_DOFASTBOOT
+#endif
 
 #define CONFIG_BOOTCOMMAND \
 	"if test ${boot_fit} -eq 1; then "	\
