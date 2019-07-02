@@ -159,9 +159,9 @@ MKIMAGEFLAGS_flash.bin = -n spl/u-boot-spl.cfgout -T $(IMAGE_TYPE) -e 0x100000
 flash.bin: MKIMAGEOUTPUT = flash.log
 
 flash.bin: spl/u-boot-spl.bin u-boot.itb FORCE
-ifeq ($(SPL_DEPFILE_EXISTS),0)
+#ifeq ($(SPL_DEPFILE_EXISTS),0)
 	$(call if_changed,mkimage)
-endif
+#endif
 endif
 
 else
