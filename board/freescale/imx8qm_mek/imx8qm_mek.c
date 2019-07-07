@@ -14,6 +14,10 @@
 #include <asm/arch/imx8-pins.h>
 #include <asm/arch/iomux.h>
 #include <asm/arch/sys_proto.h>
+#include <asm/gpio.h>
+#include <usb.h>
+#include "../common/tcpc.h"
+
 
 DECLARE_GLOBAL_DATA_PTR;
 
@@ -21,6 +25,12 @@ DECLARE_GLOBAL_DATA_PTR;
 			 (SC_PAD_ISO_OFF << PADRING_LPCONFIG_SHIFT) | \
 			 (SC_PAD_28FDSOI_DSE_DV_HIGH << PADRING_DSE_SHIFT) | \
 			 (SC_PAD_28FDSOI_PS_PU << PADRING_PULL_SHIFT))
+#define GPIO_PAD_CTRL	((SC_PAD_CONFIG_NORMAL << PADRING_CONFIG_SHIFT) | \
+			 (SC_PAD_ISO_OFF << PADRING_LPCONFIG_SHIFT) | \
+			 (SC_PAD_28FDSOI_DSE_DV_HIGH << PADRING_DSE_SHIFT) | \
+			 (SC_PAD_28FDSOI_PS_PU << PADRING_PULL_SHIFT))
+
+
 
 static iomux_cfg_t uart0_pads[] = {
 	SC_P_UART0_RX | MUX_PAD_CTRL(UART_PAD_CTRL),
@@ -88,12 +98,92 @@ int checkboard(void)
 	return 0;
 }
 
+#ifdef CONFIG_USB
+
+#ifdef CONFIG_USB_TCPC
+#define USB_TYPEC_SEL IMX_GPIO_NR(4, 6)
+#define USB_TYPEC_EN IMX_GPIO_NR(4, 19)
+
+static iomux_cfg_t ss_mux_gpio[] = {
+	SC_P_USB_SS3_TC3 | MUX_MODE_ALT(3) | MUX_PAD_CTRL(GPIO_PAD_CTRL),
+	SC_P_QSPI1A_SS0_B | MUX_MODE_ALT(3) | MUX_PAD_CTRL(GPIO_PAD_CTRL),
+};
+
+struct tcpc_port port;
+struct tcpc_port_config port_config = {
+	.i2c_bus = 0,
+	.addr = 0x51,
+	.port_type = TYPEC_PORT_DFP,
+};
+
+void ss_mux_select(enum typec_cc_polarity pol)
+{
+	if (pol == TYPEC_POLARITY_CC1)
+		gpio_direction_output(USB_TYPEC_SEL, 0);
+	else
+		gpio_direction_output(USB_TYPEC_SEL, 1);
+}
+
+static void setup_typec(void)
+{
+	imx8_iomux_setup_multiple_pads(ss_mux_gpio, ARRAY_SIZE(ss_mux_gpio));
+	gpio_request(USB_TYPEC_SEL, "typec_sel");
+	gpio_request(USB_TYPEC_EN, "typec_en");
+
+	gpio_direction_output(USB_TYPEC_EN, 1);
+
+	tcpc_init(&port, port_config, &ss_mux_select);
+}
+#endif
+
+int board_usb_init(int index, enum usb_init_type init)
+{
+	int ret = 0;
+
+	if (index == 1) {
+		if (init == USB_INIT_HOST) {
+#ifdef CONFIG_USB_TCPC
+			ret = tcpc_setup_dfp_mode(&port);
+#endif
+#ifdef CONFIG_USB_CDNS3_GADGET
+		} else {
+#ifdef CONFIG_USB_TCPC
+			ret = tcpc_setup_ufp_mode(&port);
+			printf("%d setufp mode %d\n", index, ret);
+#endif
+#endif
+		}
+	}
+
+	return ret;
+}
+
+int board_usb_cleanup(int index, enum usb_init_type init)
+{
+	int ret = 0;
+
+	if (index == 1) {
+		if (init == USB_INIT_HOST) {
+#ifdef CONFIG_USB_TCPC
+			ret = tcpc_disable_src_vbus(&port);
+#endif
+		}
+	}
+
+	return ret;
+}
+#endif
+
 int board_init(void)
 {
 	/* Power up base board */
 	sc_pm_set_resource_power_mode(-1, SC_R_BOARD_R1, SC_PM_PW_MODE_ON);
 
 	board_gpio_init();
+
+#if defined(CONFIG_USB) && defined(CONFIG_USB_TCPC)
+	setup_typec();
+#endif
 
 	return 0;
 }

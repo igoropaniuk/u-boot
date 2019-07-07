@@ -15,6 +15,8 @@
 #include <asm/arch/imx8-pins.h>
 #include <asm/arch/iomux.h>
 #include <asm/arch/sys_proto.h>
+#include <usb.h>
+#include "../common/tcpc.h"
 
 DECLARE_GLOBAL_DATA_PTR;
 
@@ -104,9 +106,103 @@ int checkboard(void)
 	return 0;
 }
 
+#ifdef CONFIG_USB
+
+#ifdef CONFIG_USB_TCPC
+#define USB_TYPEC_SEL IMX_GPIO_NR(5, 9)
+static iomux_cfg_t ss_mux_gpio[] = {
+	SC_P_ENET0_REFCLK_125M_25M | MUX_MODE_ALT(4) |
+	MUX_PAD_CTRL(GPIO_PAD_CTRL),
+};
+
+struct tcpc_port port;
+struct tcpc_port_config port_config = {
+	.i2c_bus = 1,
+	.addr = 0x50,
+	.port_type = TYPEC_PORT_DFP,
+};
+
+void ss_mux_select(enum typec_cc_polarity pol)
+{
+	if (pol == TYPEC_POLARITY_CC1)
+		gpio_direction_output(USB_TYPEC_SEL, 0);
+	else
+		gpio_direction_output(USB_TYPEC_SEL, 1);
+}
+
+static void setup_typec(void)
+{
+	int ret;
+	struct gpio_desc typec_en_desc;
+
+	imx8_iomux_setup_multiple_pads(ss_mux_gpio, ARRAY_SIZE(ss_mux_gpio));
+	gpio_request(USB_TYPEC_SEL, "typec_sel");
+
+	ret = dm_gpio_lookup_name("gpio@1a_7", &typec_en_desc);
+	if (ret) {
+		printf("%s lookup gpio@1a_7 failed ret = %d\n", __func__, ret);
+		return;
+	}
+
+	ret = dm_gpio_request(&typec_en_desc, "typec_en");
+	if (ret) {
+		printf("%s request typec_en failed ret = %d\n", __func__, ret);
+		return;
+	}
+
+	/* Enable SS MUX */
+	dm_gpio_set_dir_flags(&typec_en_desc,
+			      GPIOD_IS_OUT | GPIOD_IS_OUT_ACTIVE);
+
+	tcpc_init(&port, port_config, &ss_mux_select);
+}
+#endif
+
+int board_usb_init(int index, enum usb_init_type init)
+{
+	int ret = 0;
+
+	if (index == 1) {
+		if (init == USB_INIT_HOST) {
+#ifdef CONFIG_USB_TCPC
+			ret = tcpc_setup_dfp_mode(&port);
+#endif
+#ifdef CONFIG_USB_CDNS3_GADGET
+		} else {
+#ifdef CONFIG_USB_TCPC
+			ret = tcpc_setup_ufp_mode(&port);
+			printf("%d setufp mode %d\n", index, ret);
+#endif
+#endif
+		}
+	}
+
+	return ret;
+}
+
+int board_usb_cleanup(int index, enum usb_init_type init)
+{
+	int ret = 0;
+
+	if (index == 1) {
+		if (init == USB_INIT_HOST) {
+#ifdef CONFIG_USB_TCPC
+			ret = tcpc_disable_src_vbus(&port);
+#endif
+		}
+	}
+
+	return ret;
+}
+#endif
+
 int board_init(void)
 {
 	board_gpio_init();
+
+#if defined(CONFIG_USB) && defined(CONFIG_USB_TCPC)
+	setup_typec();
+#endif
 
 	return 0;
 }
