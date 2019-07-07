@@ -1,7 +1,21 @@
 // SPDX-License-Identifier: GPL-2.0+
 /*
- * Copyright 2018 NXP
+ * Copyright 2018-2019 NXP
  */
+
+/ {
+
+	aliases {
+		usbhost1 = &usbh3;
+	};
+
+	usbh3: usbh3 {
+		compatible = "cdns,usb3-host";
+		dr_mode = "host";
+		cdns3,usb = <&usbotg3>;
+		status = "okay";
+	};
+};
 
 &mu {
 	u-boot,dm-spl;
@@ -67,6 +81,14 @@
 	u-boot,dm-spl;
 };
 
+&pd_conn_usb2 {
+	u-boot,dm-spl;
+};
+
+&pd_conn_usb2_phy {
+	u-boot,dm-spl;
+};
+
 &gpio0 {
 	u-boot,dm-spl;
 };
@@ -103,10 +125,22 @@
 	u-boot,dm-spl;
 };
 
+&usbotg3 {
+	u-boot,dm-spl;
+};
+
+&usbphy1 {
+	u-boot,dm-spl;
+};
+
 &usdhc1 {
 	u-boot,dm-spl;
 };
 
 &usdhc2 {
+	u-boot,dm-spl;
+};
+
+&wu {
 	u-boot,dm-spl;
 };

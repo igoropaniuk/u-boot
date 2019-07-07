@@ -39,6 +39,7 @@
 		gpio5 = &gpio5;
 		gpio6 = &gpio6;
 		gpio7 = &gpio7;
+		usb1 = &usbotg3;
 	};
 
 	memory@80000000 {
@@ -185,6 +186,23 @@
 			#address-cells = <1>;
 			#size-cells = <0>;
 
+			pd_conn_usb2: PD_CONN_USB_2 {
+				reg = <SC_R_USB_2>;
+				#power-domain-cells = <0>;
+				#address-cells = <1>;
+				#size-cells = <0>;
+				power-domains = <&pd_conn>;
+				wakeup-irq = <271>;
+
+				pd_conn_usb2_phy: PD_CONN_USB_2_PHY {
+					reg = <SC_R_USB_2_PHY>;
+					#power-domain-cells = <0>;
+					power-domains = <&pd_conn_usb2>;
+					wakeup-irq = <271>;
+				};
+
+			};
+
 			pd_conn_sdch0: PD_CONN_SDHC_0 {
 				reg = <SC_R_SDHC_0>;
 				#power-domain-cells = <0>;
@@ -323,6 +341,44 @@
 		#address-cells = <1>;
 		#size-cells = <0>;
 		status = "disabled";
+	};
+
+	usbphy1: usbphy1@5b160000 {
+		compatible = "cdns,usb3-phy";
+		reg = <0x0 0x5B160000 0x0 0x40000>;
+		clocks = <&clk IMX8QXP_USB3_PHY_CLK>;
+		clock-names = "main_clk";
+		power-domains = <&pd_conn_usb2_phy>;
+		status = "disabled";
+		#phy-cells = <0>;
+	};
+
+	usbotg3: usb3@5b110000 {
+		compatible = "cdns,usb3";
+		reg = <0x0 0x5B110000 0x0 0x10000>,
+			<0x0 0x5B130000 0x0 0x10000>,
+			<0x0 0x5B140000 0x0 0x10000>,
+			<0x0 0x5B160000 0x0 0x40000>,
+			<0x0 0x5B120000 0x0 0x10000>;
+		interrupt-parent = <&wu>;
+		interrupts = <GIC_SPI 271 IRQ_TYPE_LEVEL_HIGH>;
+		clocks = <&clk IMX8QXP_USB3_LPM_CLK>,
+			<&clk IMX8QXP_USB3_BUS_CLK>,
+			<&clk IMX8QXP_USB3_ACLK>,
+			<&clk IMX8QXP_USB3_IPG_CLK>,
+			<&clk IMX8QXP_USB3_CORE_PCLK>;
+		clock-names = "usb3_lpm_clk", "usb3_bus_clk", "usb3_aclk",
+			"usb3_ipg_clk", "usb3_core_pclk";
+		power-domains = <&pd_conn_usb2>;
+		phys = <&usbphy1>;
+		status = "disabled";
+	};
+
+	wu: wu {
+		compatible = "fsl,imx8-wu";
+		interrupt-controller;
+		#interrupt-cells = <3>;
+		interrupt-parent = <&gic>;
 	};
 
 	gpio0: gpio@5d080000 {

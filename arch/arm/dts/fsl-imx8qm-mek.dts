@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0+
 /*
- * Copyright 2017-2018 NXP
+ * Copyright 2017-2019 NXP
  */
 
 /dts-v1/;
@@ -180,5 +180,13 @@
 };
 
 &gpio1 {
+	status = "okay";
+};
+
+&usbphy1 {
+	status = "okay";
+};
+
+&usbotg3 {
 	status = "okay";
 };
