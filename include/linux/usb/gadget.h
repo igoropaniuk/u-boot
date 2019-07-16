@@ -450,6 +450,8 @@ struct usb_gadget_ops {
 	int   (*match_ep)(struct usb_gadget *gadget,
 			  struct usb_ep *ep,
 			  struct usb_endpoint_descriptor *desc);
+	void	(*udc_set_speed)(struct usb_gadget *gadget,
+				 enum usb_device_speed);
 };
 
 /**
