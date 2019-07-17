@@ -16,6 +16,8 @@ static int spl_sdp_load_image(struct spl_image_info *spl_image,
 	int ret;
 	const int controller_index = 0;
 
+	usb_gadget_initialize(controller_index);
+
 	g_dnl_clear_detach();
 	ret = g_dnl_register("usb_dnl_sdp");
 	if (ret) {
@@ -36,6 +38,8 @@ static int spl_sdp_load_image(struct spl_image_info *spl_image,
 	 */
 	ret = spl_sdp_handle(controller_index, spl_image);
 	debug("SDP ended\n");
+
+	usb_gadget_release(controller_index);
 
 	return ret;
 }
