@@ -190,4 +190,12 @@ config MT76X8_USB_PHY
 
 	  This PHY is found on MT76x8 devices supporting USB.
 
+config CDNS3_USB_PHY
+	bool "Support CDNS3 USB PHY"
+	depends on PHY
+	help
+	  Support for the USB PHY in CDNS3 IP.
+
+	  This PHY is found on CDNS3 IP devices supporting USB.
+
 endmenu
