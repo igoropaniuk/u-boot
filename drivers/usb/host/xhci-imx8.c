@@ -154,6 +154,12 @@ static int xhci_imx8_probe(struct udevice *dev)
 	}
 #endif
 
+	ret = board_usb_init(dev->seq, USB_INIT_HOST);
+	if (ret != 0) {
+		printf("Failed to initialize board for USB\n");
+		return ret;
+	}
+
 	ret = generic_phy_get_by_index(&usbotg_dev, 0, &imx8_data.phy);
 	if (ret && ret != -ENOENT) {
 		printf("Failed to get USB PHY for %s\n", dev->name);
@@ -187,6 +193,8 @@ static int xhci_imx8_remove(struct udevice *dev)
 #endif
 	if (generic_phy_valid(&imx8_data.phy))
 		device_remove(imx8_data.phy.dev, DM_REMOVE_NORMAL);
+
+	board_usb_cleanup(dev->seq, USB_INIT_HOST);
 
 	return ret;
 }
