@@ -383,6 +383,7 @@ void image_print_contents(const void *ptr)
 	}
 }
 
+#ifndef USE_HOSTCC
 /**
  * print_decomp_msg() - Print a suitable decompression/loading message
  *
@@ -483,8 +484,6 @@ int image_decomp(int comp, ulong load, ulong image_start, int type,
 	return ret;
 }
 
-
-#ifndef USE_HOSTCC
 #if CONFIG_IS_ENABLED(LEGACY_IMAGE_FORMAT)
 /**
  * image_get_ramdisk - get and verify ramdisk image

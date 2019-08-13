@@ -1728,6 +1728,7 @@ int fit_conf_get_prop_node(const void *fit, int noffset,
 	return fit_conf_get_prop_node_index(fit, noffset, prop_name, 0);
 }
 
+#ifndef USE_HOSTCC
 static int fit_image_select(const void *fit, int rd_noffset, int verify)
 {
 	fit_image_print(fit, rd_noffset, "   ");
@@ -1743,6 +1744,7 @@ static int fit_image_select(const void *fit, int rd_noffset, int verify)
 
 	return 0;
 }
+#endif /* USE_HOSTCC */
 
 int fit_get_node_from_config(bootm_headers_t *images, const char *prop_name,
 			ulong addr)
@@ -1771,6 +1773,7 @@ int fit_get_node_from_config(bootm_headers_t *images, const char *prop_name,
 	return noffset;
 }
 
+#ifndef USE_HOSTCC
 /**
  * fit_get_image_type_property() - get property name for IH_TYPE_...
  *
@@ -2009,6 +2012,7 @@ int fit_image_load(bootm_headers_t *images, ulong addr,
 		} else {
 			loadbuf = map_sysmem(load, max_decomp_len);
 		}
+
 		if (image_decomp(comp, load, data, image_type,
 				loadbuf, buf, len, max_decomp_len, &load_end)) {
 			printf("Error decompressing %s\n", prop_name);
@@ -2060,7 +2064,6 @@ int boot_get_setup_fit(bootm_headers_t *images, uint8_t arch,
 	return ret;
 }
 
-#ifndef USE_HOSTCC
 int boot_get_fdt_fit(bootm_headers_t *images, ulong addr,
 		   const char **fit_unamep, const char **fit_uname_configp,
 		   int arch, ulong *datap, ulong *lenp)
