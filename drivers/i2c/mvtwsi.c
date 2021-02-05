@@ -15,7 +15,7 @@
 #include <asm/io.h>
 #include <linux/bitops.h>
 #include <linux/compat.h>
-#ifdef CONFIG_DM_I2C
+#if CONFIG_IS_ENABLED(DM_I2C)
 #include <dm.h>
 #endif
 
@@ -26,7 +26,7 @@ DECLARE_GLOBAL_DATA_PTR;
  * settings
  */
 
-#ifndef CONFIG_DM_I2C
+#if !CONFIG_IS_ENABLED(DM_I2C)
 #if defined(CONFIG_ARCH_ORION5X)
 #include <asm/arch/orion5x.h>
 #elif (defined(CONFIG_ARCH_KIRKWOOD) || defined(CONFIG_ARCH_MVEBU))
@@ -42,7 +42,7 @@ DECLARE_GLOBAL_DATA_PTR;
  * On SUNXI, we get CONFIG_SYS_TCLK from this include, so we want to
  * always have it.
  */
-#if defined(CONFIG_DM_I2C) && defined(CONFIG_ARCH_SUNXI)
+#if CONFIG_IS_ENABLED(DM_I2C) && defined(CONFIG_ARCH_SUNXI)
 #include <asm/arch/i2c.h>
 #endif
 
@@ -82,7 +82,7 @@ struct  mvtwsi_registers {
 
 #endif
 
-#ifdef CONFIG_DM_I2C
+#if CONFIG_IS_ENABLED(DM_I2C)
 struct mvtwsi_i2c_dev {
 	/* TWSI Register base for the device */
 	struct mvtwsi_registers *base;
@@ -183,7 +183,7 @@ inline uint calc_tick(uint speed)
 	return (1000000000u / speed) + 100;
 }
 
-#ifndef CONFIG_DM_I2C
+#if !CONFIG_IS_ENABLED(DM_I2C)
 
 /*
  * twsi_get_base() - Get controller register base for specified adapter
@@ -480,7 +480,7 @@ static uint __twsi_i2c_set_bus_speed(struct mvtwsi_registers *twsi,
 	writel(baud, &twsi->baudrate);
 
 	/* Wait for controller for one tick */
-#ifdef CONFIG_DM_I2C
+#if CONFIG_IS_ENABLED(DM_I2C)
 	ndelay(calc_tick(highest_speed));
 #else
 	ndelay(10000);
@@ -515,7 +515,7 @@ static void __twsi_i2c_init(struct mvtwsi_registers *twsi, int speed,
 	writel(slaveadd, &twsi->slave_address);
 	writel(0, &twsi->xtnd_slave_addr);
 	/* Assert STOP, but don't care for the result */
-#ifdef CONFIG_DM_I2C
+#if CONFIG_IS_ENABLED(DM_I2C)
 	(void) twsi_stop(twsi, calc_tick(*actual_speed));
 #else
 	(void) twsi_stop(twsi, 10000);
@@ -682,7 +682,7 @@ static int __twsi_i2c_write(struct mvtwsi_registers *twsi, uchar chip,
 	return status != 0 ? status : stop_status;
 }
 
-#ifndef CONFIG_DM_I2C
+#if !CONFIG_IS_ENABLED(DM_I2C)
 static void twsi_i2c_init(struct i2c_adapter *adap, int speed,
 			  int slaveadd)
 {
