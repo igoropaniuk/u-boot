@@ -34,3 +34,4 @@ Shell commands
    qfw
    sbi
    true
+   reset
