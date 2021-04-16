@@ -1,7 +1,8 @@
 config RSA
 	bool "Use RSA Library"
 	select RSA_FREESCALE_EXP if FSL_CAAM && !ARCH_MX7 && !ARCH_MX6 && !ARCH_MX5
-	select RSA_SOFTWARE_EXP if !RSA_FREESCALE_EXP
+	select RSA_SOFTWARE_EXP if !RSA_FREESCALE_EXP && DM
+	select RSA_SOFTWARE_EXP_TINY if !RSA_FREESCALE_EXP && !DM
 	help
 	  RSA support. This enables the RSA algorithm used for FIT image
 	  verification in U-Boot.
@@ -44,6 +45,14 @@ config RSA_VERIFY_WITH_PKEY
 	  This options enables RSA signature verification with a public key
 	  directly specified in image_sign_info, where all the necessary
 	  key properties will be calculated on the fly in verification code.
+
+config RSA_SOFTWARE_EXP_TINY
+	bool "Enable non-DM RSA Modular Exponentiation software implementation"
+	help
+	  Enable modular exponentiation implementation in software, which
+	  does not require Driver Model to be enabled. This is a RSA algorithm
+	  used in FIT image verification. It required RSA Key as input.
+	  See doc/uImage.FIT/signature.txt for more details.
 
 config RSA_SOFTWARE_EXP
 	bool "Enable driver for RSA Modular Exponentiation in software"

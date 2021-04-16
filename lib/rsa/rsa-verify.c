@@ -319,7 +319,7 @@ static int rsa_verify_key(struct image_sign_info *info,
 			  const uint32_t key_len)
 {
 	int ret;
-#if !defined(USE_HOSTCC)
+#if !(defined(USE_HOSTCC) || defined(RSA_SOFTWARE_EXP_TINY))
 	struct udevice *mod_exp_dev;
 #endif
 	struct checksum_algo *checksum = info->checksum;
@@ -346,7 +346,9 @@ static int rsa_verify_key(struct image_sign_info *info,
 	uint8_t buf[sig_len];
 	hash_len = checksum->checksum_len;
 
-#if !defined(USE_HOSTCC)
+#if defined(USE_HOSTCC) || defined(RSA_SOFTWARE_EXP_TINY)
+	ret = rsa_mod_exp_sw(sig, sig_len, prop, buf);
+#else
 	ret = uclass_get_device(UCLASS_MOD_EXP, 0, &mod_exp_dev);
 	if (ret) {
 		printf("RSA: Can't find Modular Exp implementation\n");
@@ -354,8 +356,6 @@ static int rsa_verify_key(struct image_sign_info *info,
 	}
 
 	ret = rsa_mod_exp(mod_exp_dev, sig, sig_len, prop, buf);
-#else
-	ret = rsa_mod_exp_sw(sig, sig_len, prop, buf);
 #endif
 	if (ret) {
 		debug("Error in Modular exponentation\n");
