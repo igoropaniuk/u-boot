@@ -877,13 +877,13 @@ static int initf_upl(void)
 
 static const init_fnc_t init_sequence_f[] = {
 	setup_mon_len,
+	initf_malloc,
 #ifdef CONFIG_OF_CONTROL
 	fdtdec_setup,
 #endif
 #ifdef CONFIG_TRACE_EARLY
 	trace_early_init,
 #endif
-	initf_malloc,
 	initf_upl,
 	log_init,
 	initf_bootstage,	/* uses its own timer, so does not need DM */
