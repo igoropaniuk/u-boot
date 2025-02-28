@@ -18,6 +18,7 @@
 #include <dm/pinctrl.h>
 #include <dm/uclass-internal.h>
 #include <dm/read.h>
+#include <efi_stub.h>
 #include <power/regulator.h>
 #include <env.h>
 #include <fdt_support.h>
@@ -40,6 +41,8 @@ DECLARE_GLOBAL_DATA_PTR;
 static struct mm_region rbx_mem_map[CONFIG_NR_DRAM_BANKS + 2] = { { 0 } };
 
 struct mm_region *mem_map = rbx_mem_map;
+
+struct efi_info_hdr *efi_info __section(".data") = NULL;
 
 static struct {
 	phys_addr_t start;
@@ -83,6 +86,16 @@ static void qcom_configure_bi_dram(void)
 
 int dram_init_banksize(void)
 {
+#ifdef CONFIG_EFI_STUB
+	gd->arch.table = (phys_addr_t)efi_info;
+	/* We actually parsed a memory map from SMEM (and used it to
+	 * set ram_base/ram_top), but it's better to respect the table
+	 * from the EFI bootloader.
+	 */
+	if (efi_info)
+		dram_init_banksize_from_efi();
+	else
+#endif
 	qcom_configure_bi_dram();
 
 	return 0;
@@ -154,12 +167,25 @@ static void show_psci_version(void)
 int board_fdt_blob_setup(void **fdtp)
 {
 	struct fdt_header *fdt;
+	struct efi_info_hdr *info = NULL;
 	bool internal_valid, external_valid;
 	int ret = 0;
 
 	fdt = (struct fdt_header *)get_prev_bl_fdt_addr();
 	external_valid = fdt && !fdt_check_header(fdt);
 	internal_valid = !fdt_check_header(*fdtp);
+
+	/*
+	 * If EFI_STUB is enabled, we got handed a pointer and it's NOT
+	 * a valid FDT, then it might be the efi_info table!
+	 */
+	if (CONFIG_IS_ENABLED(EFI_STUB) && fdt && !external_valid)
+		info = (struct efi_info_hdr *)fdt;
+
+	if (info->version == 1) {
+		debug("Got EFI info header!\n");
+		efi_info = info;
+	}
 
 	/*
 	 * There is no point returning an error here, U-Boot can't do anything useful in this situation.

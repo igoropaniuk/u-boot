@@ -3,6 +3,8 @@
 #ifndef __QCOM_PRIV_H__
 #define __QCOM_PRIV_H__
 
+extern struct efi_info_hdr *efi_info;
+
 #if IS_ENABLED(CONFIG_EFI_HAVE_CAPSULE_SUPPORT)
 void qcom_configure_capsule_updates(void);
 #else
