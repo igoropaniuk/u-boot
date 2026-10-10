@@ -42,16 +42,8 @@ struct rpmb_dev_info {
 
 static void release_mmc(struct optee_private *priv)
 {
-	int rc;
-
 	if (!priv->rpmb_mmc)
 		return;
-
-	rc = blk_select_hwpart_devnum(UCLASS_MMC, priv->rpmb_dev_id,
-				      priv->rpmb_original_part);
-	if (rc)
-		debug("%s: blk_select_hwpart_devnum() failed: %d\n",
-		      __func__, rc);
 
 	priv->rpmb_mmc = NULL;
 }
@@ -59,7 +51,6 @@ static void release_mmc(struct optee_private *priv)
 static struct mmc *get_mmc(struct optee_private *priv, int dev_id)
 {
 	struct mmc *mmc;
-	int rc;
 
 	if (priv->rpmb_mmc && priv->rpmb_dev_id == dev_id)
 		return priv->rpmb_mmc;
@@ -86,17 +77,42 @@ static struct mmc *get_mmc(struct optee_private *priv, int dev_id)
 	}
 
 	priv->rpmb_original_part = mmc_get_blk_desc(mmc)->hwpart;
-
-	rc = blk_select_hwpart_devnum(UCLASS_MMC, dev_id, MMC_PART_RPMB);
-	if (rc) {
-		debug("Device id %d: cannot select RPMB partition: %d\n",
-		      dev_id, rc);
-		return NULL;
-	}
-
 	priv->rpmb_mmc = mmc;
 	priv->rpmb_dev_id = dev_id;
 	return mmc;
+}
+
+/*
+ * The RPMB hardware partition is selected for the duration of a single
+ * request only. Between two requests other users of the same eMMC, for
+ * instance libavb reading the user area while verifying a chain of
+ * partitions, switch the device back to the user area. Keeping RPMB
+ * selected across requests would make those reads, and the following RPMB
+ * frames, hit the wrong partition.
+ */
+static int select_rpmb_part(struct optee_private *priv)
+{
+	int rc;
+
+	priv->rpmb_original_part = mmc_get_blk_desc(priv->rpmb_mmc)->hwpart;
+	rc = blk_select_hwpart_devnum(UCLASS_MMC, priv->rpmb_dev_id,
+				      MMC_PART_RPMB);
+	if (rc)
+		debug("Device id %d: cannot select RPMB partition: %d\n",
+		      priv->rpmb_dev_id, rc);
+
+	return rc;
+}
+
+static void restore_part(struct optee_private *priv)
+{
+	int rc;
+
+	rc = blk_select_hwpart_devnum(UCLASS_MMC, priv->rpmb_dev_id,
+				      priv->rpmb_original_part);
+	if (rc)
+		debug("%s: blk_select_hwpart_devnum() failed: %d\n",
+		      __func__, rc);
 }
 
 static u32 rpmb_get_dev_info(u16 dev_id, struct rpmb_dev_info *info)
@@ -130,6 +146,7 @@ static u32 rpmb_process_request(struct optee_private *priv, void *req,
 {
 	struct rpmb_req *sreq = req;
 	struct mmc *mmc;
+	int rc;
 
 	if (req_size < sizeof(*sreq))
 		return TEE_ERROR_BAD_PARAMETERS;
@@ -139,9 +156,13 @@ static u32 rpmb_process_request(struct optee_private *priv, void *req,
 		mmc = get_mmc(priv, sreq->dev_id);
 		if (!mmc)
 			return TEE_ERROR_ITEM_NOT_FOUND;
-		if (mmc_rpmb_route_frames(mmc, RPMB_REQ_DATA(req),
-					  req_size - sizeof(struct rpmb_req),
-					  rsp, rsp_size))
+		if (select_rpmb_part(priv))
+			return TEE_ERROR_ITEM_NOT_FOUND;
+		rc = mmc_rpmb_route_frames(mmc, RPMB_REQ_DATA(req),
+					   req_size - sizeof(struct rpmb_req),
+					   rsp, rsp_size);
+		restore_part(priv);
+		if (rc)
 			return TEE_ERROR_BAD_PARAMETERS;
 		return TEE_SUCCESS;
 
