@@ -306,6 +306,16 @@ static int sdhci_send_command(struct mmc *mmc, struct mmc_cmd *cmd,
 		if (stat & SDHCI_INT_ERROR)
 			break;
 
+		/*
+		 * Check completion before the timeout: the status read itself
+		 * may have taken longer than SDHCI_READ_STATUS_TIMEOUT (for
+		 * example when an emulated controller performs a long DMA
+		 * transfer while holding the guest's MMIO path), and a command
+		 * that has completed must not be reported as timed out.
+		 */
+		if ((stat & mask) == mask)
+			break;
+
 		if (host->quirks & SDHCI_QUIRK_BROKEN_R1B &&
 		    cmd->resp_type & MMC_RSP_BUSY && !data) {
 			unsigned int state =
