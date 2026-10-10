@@ -42,6 +42,8 @@ struct optee_private {
 	struct mmc *rpmb_mmc;
 	int rpmb_dev_id;
 	int rpmb_original_part;
+	/* Non-zero while a supplicant RPC from OP-TEE is being serviced */
+	int in_supplicant;
 };
 
 struct optee_msg_arg;

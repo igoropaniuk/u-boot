@@ -3,6 +3,7 @@
  * Copyright (c) 2018, Linaro Limited
  */
 
+#include <dm.h>
 #include <log.h>
 #include <malloc.h>
 #include <tee.h>
@@ -73,8 +74,10 @@ static void cmd_shm_free(struct optee_msg_arg *arg)
 void optee_suppl_cmd(struct udevice *dev, struct tee_shm *shm_arg,
 		     void **page_list)
 {
+	struct optee_private *priv = dev_get_priv(dev);
 	struct optee_msg_arg *arg = shm_arg->addr;
 
+	priv->in_supplicant++;
 	switch (arg->cmd) {
 	case OPTEE_MSG_RPC_CMD_SHM_ALLOC:
 		cmd_shm_alloc(dev, arg, page_list);
@@ -95,6 +98,7 @@ void optee_suppl_cmd(struct udevice *dev, struct tee_shm *shm_arg,
 	default:
 		arg->ret = TEE_ERROR_NOT_IMPLEMENTED;
 	}
+	priv->in_supplicant--;
 
 	arg->ret_origin = TEE_ORIGIN_COMMS;
 }
