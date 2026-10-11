@@ -300,6 +300,12 @@ init_boot_comp_addr_r
     Address to which to load the init_boot Android image (boot image header
     version 4 devices with an init_boot partition), e.g. 0xe4000000
 
+adtb_idx, adtbo_idx
+    Index of the device tree in vendor_boot and of the overlay in the dtbo
+    partition the Android bootmeth boots with (default 0). The dtbo image is
+    loaded to fdtoverlay_addr_r and the resulting device tree is built at
+    fdt_addr_r.
+
 Some variables are set by script bootmeth:
 
 devtype

@@ -20,12 +20,16 @@
 #include <bootm.h>
 #include <bootmeth.h>
 #include <dm.h>
+#include <dt_table.h>
 #include <env.h>
+#include <fdt_support.h>
 #include <image.h>
+#include <image-android-dt.h>
 #include <malloc.h>
 #include <mapmem.h>
 #include <part.h>
 #include <version.h>
+#include <linux/sizes.h>
 #include "bootmeth_android.h"
 
 #define BCB_FIELD_COMMAND_SZ 32
@@ -33,6 +37,9 @@
 #define BOOT_PART_NAME "boot"
 #define VENDOR_BOOT_PART_NAME "vendor_boot"
 #define INIT_BOOT_PART_NAME "init_boot"
+#define DTBO_PART_NAME "dtbo"
+/* room for the overlays and the properties the kernel boot adds */
+#define FDT_EXTRA_SPACE SZ_64K
 #define SLOT_LEN 2
 
 /**
@@ -54,6 +61,11 @@
  * @vendor_boot_part_size: Size of the vendor_boot partition in bytes
  * @init_boot_addr: Where the init_boot image was loaded (0 if not loaded)
  * @init_boot_part_size: Size of the init_boot partition in bytes
+ * @dtbo_img_size: Size of the dtbo image (0 if there is no dtbo partition)
+ * @dtbo_addr: Where the dtbo image was loaded (0 if not loaded)
+ * @dtbo_part_size: Size of the dtbo partition in bytes
+ * @fdt_addr: Device tree to boot with after the overlays were applied (0 to
+ *	let bootm choose)
  */
 struct android_priv {
 	enum android_boot_mode boot_mode;
@@ -62,12 +74,16 @@ struct android_priv {
 	u32 boot_img_size;
 	u32 vendor_boot_img_size;
 	u32 init_boot_img_size;
+	u32 dtbo_img_size;
 	ulong boot_addr;
 	ulong boot_part_size;
 	ulong vendor_boot_addr;
 	ulong vendor_boot_part_size;
 	ulong init_boot_addr;
 	ulong init_boot_part_size;
+	ulong dtbo_addr;
+	ulong dtbo_part_size;
+	ulong fdt_addr;
 };
 
 static int android_check(struct udevice *dev, struct bootflow_iter *iter)
@@ -168,6 +184,31 @@ static int scan_vendor_boot_part(struct udevice *blk, struct android_priv *priv)
 			       is_android_vendor_boot_image_header,
 			       android_image_get_vendor_bootimg_size,
 			       &priv->vendor_boot_img_size, NULL);
+}
+
+static bool dtbo_is_header(const void *buf)
+{
+	return android_dt_check_header(map_to_sysmem(buf));
+}
+
+static bool dtbo_get_size(const void *buf, u32 *sizep)
+{
+	const struct dt_table_header *hdr = buf;
+
+	*sizep = fdt32_to_cpu(hdr->total_size);
+
+	return *sizep >= sizeof(*hdr);
+}
+
+/*
+ * dtbo holds the device tree overlays (Android DT table image, see
+ * mkdtboimg); it is verified by AVB like the boot images.
+ */
+static int scan_dtbo_part(struct udevice *blk, struct android_priv *priv)
+{
+	return scan_image_part(blk, DTBO_PART_NAME, priv->slot,
+			       sizeof(struct dt_table_header), dtbo_is_header,
+			       dtbo_get_size, &priv->dtbo_img_size, NULL);
 }
 
 /*
@@ -416,6 +457,16 @@ static int android_read_bootflow(struct udevice *dev, struct bootflow *bflow)
 		}
 	}
 
+	/* the overlays are optional, a broken dtbo partition is an error */
+	ret = scan_dtbo_part(bflow->blk, priv);
+	if (ret == -ENOENT) {
+		log_debug("no dtbo partition\n");
+		priv->dtbo_img_size = 0;
+	} else if (ret < 0) {
+		log_debug("scan dtbo failed: err=%d\n", ret);
+		goto free_priv;
+	}
+
 	/*
 	 * Ignoring return code for the following configurations:
 	 * these are not mandatory for booting.
@@ -609,8 +660,8 @@ static int run_avb_verification(struct bootflow *bflow)
 {
 	struct blk_desc *desc = dev_get_uclass_plat(bflow->blk);
 	struct android_priv *priv = bflow->bootmeth_priv;
-	/* boot, vendor_boot, init_boot and the terminator */
-	const char *requested_partitions[4];
+	/* boot, vendor_boot, init_boot, dtbo and the terminator */
+	const char *requested_partitions[5];
 	int num_requested = 0;
 	struct AvbOps *avb_ops;
 	AvbSlotVerifyResult result;
@@ -641,6 +692,8 @@ static int run_avb_verification(struct bootflow *bflow)
 		requested_partitions[num_requested++] = VENDOR_BOOT_PART_NAME;
 	if (priv->init_boot_addr)
 		requested_partitions[num_requested++] = INIT_BOOT_PART_NAME;
+	if (priv->dtbo_addr)
+		requested_partitions[num_requested++] = DTBO_PART_NAME;
 	requested_partitions[num_requested] = NULL;
 
 	/*
@@ -677,6 +730,17 @@ static int run_avb_verification(struct bootflow *bflow)
 					    priv->init_boot_part_size);
 		if (ret) {
 			ret = log_msg_ret("avb preload init_boot", ret);
+			goto out;
+		}
+	}
+	if (priv->dtbo_addr) {
+		snprintf(partname, sizeof(partname), "dtbo%s", slot_suffix);
+		ret = avb_ops_add_preloaded(avb_ops, partname,
+					    map_sysmem(priv->dtbo_addr, 0),
+					    priv->dtbo_img_size,
+					    priv->dtbo_part_size);
+		if (ret) {
+			ret = log_msg_ret("avb preload dtbo", ret);
 			goto out;
 		}
 	}
@@ -821,6 +885,97 @@ static int append_bootargs_to_cmdline(struct bootflow *bflow)
 	return 0;
 }
 
+/**
+ * apply_dtbo() - Build the device tree to boot with from the base DT and dtbo
+ *
+ * The base device tree is the one in vendor_boot (index adtb_idx, as bootm
+ * would pick it) or, when the image carries none, the one at ${fdtaddr}
+ * (e.g. from firmware). It is copied to ${fdt_addr_r} with room to grow and
+ * the overlay adtbo_idx of the dtbo image is applied; priv->fdt_addr then
+ * tells bootm to use it. Selecting the overlay by board id/rev is left to
+ * the board (set adtbo_idx accordingly).
+ *
+ * @bflow: Bootflow being booted
+ * Return: 0 if OK, negative errno on failure
+ */
+static int apply_dtbo(struct bootflow *bflow)
+{
+	struct android_priv *priv = bflow->bootmeth_priv;
+	ulong fdt_addr = env_get_hex("fdt_addr_r", 0);
+	u32 dtb_idx = env_get_ulong("adtb_idx", 10, 0);
+	u32 dtbo_idx = env_get_ulong("adtbo_idx", 10, 0);
+	ulong base_addr = 0, ov_addr;
+	u32 base_size = 0, ov_size;
+	void *base, *fdt, *ov;
+	bool vendor_dtb = false;
+	int ret;
+
+	if (!fdt_addr) {
+		log_err("fdt_addr_r is not set, cannot apply dtbo\n");
+		return log_msg_ret("fdt addr", -EINVAL);
+	}
+
+	if (priv->vendor_boot_addr) {
+		const struct andr_vnd_boot_img_hdr *vhdr;
+
+		vhdr = map_sysmem(priv->vendor_boot_addr, sizeof(*vhdr));
+		vendor_dtb = vhdr->dtb_size != 0;
+		unmap_sysmem(vhdr);
+	}
+	if (vendor_dtb) {
+		if (!android_image_get_dtb_by_index(priv->boot_addr,
+						    priv->vendor_boot_addr,
+						    dtb_idx, &base_addr,
+						    &base_size))
+			return log_msg_ret("vendor dtb", -EINVAL);
+	} else {
+		base_addr = env_get_hex("fdtaddr", 0);
+		if (!base_addr) {
+			log_err("no device tree in vendor_boot and fdtaddr is not set\n");
+			return log_msg_ret("base dtb", -ENOENT);
+		}
+		base = map_sysmem(base_addr, 0);
+		if (fdt_check_header(base)) {
+			unmap_sysmem(base);
+			return log_msg_ret("fdtaddr", -EINVAL);
+		}
+		base_size = fdt_totalsize(base);
+		unmap_sysmem(base);
+	}
+
+	if (!android_dt_get_fdt_by_index(priv->dtbo_addr, dtbo_idx, &ov_addr,
+					 &ov_size))
+		return log_msg_ret("dtbo index", -ENOENT);
+
+	base = map_sysmem(base_addr, base_size);
+	fdt = map_sysmem(fdt_addr, base_size + ov_size + FDT_EXTRA_SPACE);
+	ret = fdt_open_into(base, fdt, base_size + ov_size + FDT_EXTRA_SPACE);
+	unmap_sysmem(base);
+	if (ret) {
+		unmap_sysmem(fdt);
+		return log_msg_ret("fdt copy", -EINVAL);
+	}
+
+	/* fdt_overlay_apply() consumes the overlay, work on a copy */
+	ov = malloc(ov_size);
+	if (!ov) {
+		unmap_sysmem(fdt);
+		return log_msg_ret("ov", -ENOMEM);
+	}
+	memcpy(ov, map_sysmem(ov_addr, ov_size), ov_size);
+	ret = fdt_overlay_apply_verbose(fdt, ov);
+	free(ov);
+	unmap_sysmem(fdt);
+	if (ret)
+		return log_msg_ret("overlay", -EINVAL);
+
+	log_info("Applied dtbo overlay %u to the %s device tree\n", dtbo_idx,
+		 vendor_dtb ? "vendor_boot" : "firmware");
+	priv->fdt_addr = fdt_addr;
+
+	return 0;
+}
+
 static int boot_android_normal(struct bootflow *bflow)
 {
 	struct blk_desc *desc = dev_get_uclass_plat(bflow->blk);
@@ -829,6 +984,7 @@ static int boot_android_normal(struct bootflow *bflow)
 	ulong loadaddr = env_get_hex("loadaddr", 0);
 	ulong vloadaddr = env_get_hex("vendor_boot_comp_addr_r", 0);
 	ulong iloadaddr = env_get_hex("init_boot_comp_addr_r", 0);
+	ulong dloadaddr = env_get_hex("fdtoverlay_addr_r", 0);
 
 	/*
 	 * Load the images first and verify them in place: libavb hashes these
@@ -863,9 +1019,29 @@ static int boot_android_normal(struct bootflow *bflow)
 		priv->init_boot_addr = iloadaddr;
 	}
 
+	if (priv->dtbo_img_size) {
+		if (!dloadaddr) {
+			log_err("fdtoverlay_addr_r is not set\n");
+			return log_msg_ret("dtbo addr", -EINVAL);
+		}
+		ret = read_slotted_partition(desc, "dtbo", priv->slot,
+					     priv->dtbo_img_size, dloadaddr,
+					     &priv->dtbo_part_size);
+		if (ret < 0)
+			return log_msg_ret("read dtbo", ret);
+		priv->dtbo_addr = dloadaddr;
+	}
+
 	ret = run_avb_verification(bflow);
 	if (ret < 0)
 		return log_msg_ret("avb", ret);
+
+	/* only verified overlays are applied */
+	if (priv->dtbo_addr) {
+		ret = apply_dtbo(bflow);
+		if (ret < 0)
+			return log_msg_ret("dtbo", ret);
+	}
 
 	/* Read slot once more to decrement counter from BCB */
 	ret = android_read_slot_from_bcb(bflow, true);
@@ -885,7 +1061,7 @@ static int boot_android_normal(struct bootflow *bflow)
 	if (ret < 0)
 		return log_msg_ret("bootargs append", ret);
 
-	ret = bootm_boot_start(loadaddr, bflow->cmdline);
+	ret = bootm_boot_start_fdt(loadaddr, bflow->cmdline, priv->fdt_addr);
 
 	return log_msg_ret("boot", ret);
 }

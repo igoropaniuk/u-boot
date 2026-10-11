@@ -324,6 +324,19 @@ void zimage_dump(struct boot_params *base_ptr, bool show_cmdline);
 int bootm_boot_start(ulong addr, const char *cmdline);
 
 /**
+ * bootm_boot_start_fdt() - Boot an image with a given device tree
+ *
+ * Like bootm_boot_start() but with the device tree to use (as if given
+ * on the bootm command line) instead of bootm's own selection.
+ *
+ * @addr: Address of image
+ * @cmdline: Command line to use (NULL to use the environment)
+ * @fdt_addr: Address of the device tree, 0 to let bootm choose
+ * Return: 0 if OK, -ve on error
+ */
+int bootm_boot_start_fdt(ulong addr, const char *cmdline, ulong fdt_addr);
+
+/**
  * bootm_final() - Announce and do cleanup before boot
  *
  * This performs the common pre-boot steps: printing the "Starting kernel"
