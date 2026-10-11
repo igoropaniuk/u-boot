@@ -56,6 +56,42 @@ int ab_get_control(struct blk_desc *dev_desc,
 		   struct bootloader_control *abc);
 
 /**
+ * ab_get_merge_status() - Read the Virtual A/B merge status.
+ *
+ * @dev_desc: Device description pointer
+ * @part_info: Partition information (normally "misc")
+ * @source_slot: If not NULL, where to store the slot the status was written
+ *	from
+ *
+ * Reads struct misc_virtual_ab_message from the system space of the misc
+ * partition (written by the boot control HAL, IBootControl
+ * setSnapshotMergeStatus()).
+ *
+ * Return: the merge status (MISC_VIRTUAL_AB_MERGE_STATUS_*), NONE when the
+ *	message is absent or invalid, or a negative on I/O error
+ */
+int ab_get_merge_status(struct blk_desc *dev_desc,
+			const struct disk_partition *part_info,
+			int *source_slot);
+
+/**
+ * ab_set_active_slot() - Make a slot the one to boot next ("set_active").
+ *
+ * @dev_desc: Device description pointer
+ * @part_info: Partition information (normally "misc")
+ * @slot: Slot number to activate
+ *
+ * Gives @slot the highest priority with a fresh try count and lowers the
+ * others, like the boot control HAL's setActiveBootSlot(). Refused while a
+ * Virtual A/B merge is in progress, since the merging slot must keep
+ * booting until the merge completes.
+ *
+ * Return: 0 on success, -EBUSY while merging, or a negative on error
+ */
+int ab_set_active_slot(struct blk_desc *dev_desc,
+		       const struct disk_partition *part_info, int slot);
+
+/**
  * ab_dump_abc() - Dump ABC information for specific partition.
  *
  * @dev_desc: Device description pointer
