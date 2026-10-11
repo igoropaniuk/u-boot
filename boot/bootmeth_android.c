@@ -505,6 +505,28 @@ static bool slot_is_known_good(struct bootflow *bflow)
 	return abc.slot_info[slot].successful_boot;
 }
 
+/**
+ * android_restart_caused_by_hashtree_corruption() - Was the last reboot
+ * caused by a dm-verity error?
+ *
+ * When the kernel hits a dm-verity corruption in "restart" mode it reboots
+ * with the reason "dm-verity device corrupted". How the bootloader learns
+ * about it is platform specific (PMIC or SoC reboot reason registers, a
+ * warm boot scratch register...), so boards override this; the default
+ * looks at the "avb_hashtree_restart" environment variable, which a board
+ * script or a test can set.
+ *
+ * With AVB_HASHTREE_ERROR_MODE_MANAGED_RESTART_AND_EIO libavb then switches
+ * the persistent verity mode to "eio" (androidboot.veritymode=eio), so that
+ * the corrupted slot stops rebooting in a loop and fails its reads instead.
+ *
+ * Return: true if the last reboot was caused by a hashtree corruption
+ */
+__weak bool android_restart_caused_by_hashtree_corruption(void)
+{
+	return env_get_yesno("avb_hashtree_restart") == 1;
+}
+
 static int run_avb_verification(struct bootflow *bflow)
 {
 	struct blk_desc *desc = dev_get_uclass_plat(bflow->blk);
@@ -516,6 +538,8 @@ static int run_avb_verification(struct bootflow *bflow)
 	AvbSlotVerifyResult result;
 	AvbSlotVerifyData *out_data = NULL;
 	enum avb_boot_state boot_state;
+	AvbHashtreeErrorMode hashtree_mode;
+	AvbSlotVerifyFlags flags;
 	char *extra_args;
 	char slot_suffix[3] = "";
 	char partname[PART_NAME_LEN];
@@ -588,12 +612,27 @@ static int run_avb_verification(struct bootflow *bflow)
 		goto out;
 	}
 
-	result = avb_slot_verify(avb_ops,
-				 requested_partitions,
-				 slot_suffix,
-				 unlocked,
-				 AVB_HASHTREE_ERROR_MODE_RESTART_AND_INVALIDATE,
-				 &out_data);
+	flags = unlocked ? AVB_SLOT_VERIFY_FLAGS_ALLOW_VERIFICATION_ERROR :
+		AVB_SLOT_VERIFY_FLAGS_NONE;
+
+	/*
+	 * dm-verity error handling: with persistent values (the AVB TA) let
+	 * libavb manage the verity mode, as Android expects since 11: restart
+	 * on the first corruption, then switch the slot to "eio" if the restart
+	 * was caused by one. Without them, restart and invalidate.
+	 */
+	if (avb_ops->read_persistent_value && avb_ops->write_persistent_value) {
+		hashtree_mode = AVB_HASHTREE_ERROR_MODE_MANAGED_RESTART_AND_EIO;
+		if (android_restart_caused_by_hashtree_corruption()) {
+			log_warning("restart caused by a hashtree corruption\n");
+			flags |= AVB_SLOT_VERIFY_FLAGS_RESTART_CAUSED_BY_HASHTREE_CORRUPTION;
+		}
+	} else {
+		hashtree_mode = AVB_HASHTREE_ERROR_MODE_RESTART_AND_INVALIDATE;
+	}
+
+	result = avb_slot_verify(avb_ops, requested_partitions, slot_suffix,
+				 flags, hashtree_mode, &out_data);
 
 	if (!unlocked) {
 		/* When device is locked, we only accept AVB_SLOT_VERIFY_RESULT_OK */
