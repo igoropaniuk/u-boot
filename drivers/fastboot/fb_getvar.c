@@ -28,6 +28,7 @@ static void getvar_has_slot(char *var_parameter, char *response);
 static void getvar_partition_type(char *part_name, char *response);
 static void getvar_partition_size(char *part_name, char *response);
 static void getvar_is_userspace(char *var_parameter, char *response);
+static void getvar_unlocked(char *var_parameter, char *response);
 
 static const struct {
 	const char *variable;
@@ -88,6 +89,10 @@ static const struct {
 		.dispatch = getvar_partition_size,
 		.list = false
 #endif
+	}, {
+		.variable = "unlocked",
+		.dispatch = CONFIG_IS_ENABLED(FASTBOOT_CMD_FLASHING, (getvar_unlocked), (NULL)),
+		.list = CONFIG_IS_ENABLED(FASTBOOT_CMD_FLASHING)
 	}, {
 		.variable = "is-userspace",
 		.dispatch = getvar_is_userspace,
@@ -346,3 +351,32 @@ void fastboot_getvar(char *cmd_parameter, char *response)
 		fastboot_fail("Variable not implemented", response);
 	}
 }
+
+#if CONFIG_IS_ENABLED(FASTBOOT_CMD_FLASHING)
+#include <avb_verify.h>
+
+/* "yes" when the device is unlocked according to the AVB TA, else "no" */
+static void getvar_unlocked(char *var_parameter, char *response)
+{
+	AvbOps *ops;
+	bool unlocked = false;
+	AvbIOResult rc;
+
+	ops = avb_ops_alloc(CONFIG_FASTBOOT_FLASH_MMC_DEV);
+	if (!ops) {
+		fastboot_fail("cannot allocate AVB ops", response);
+		return;
+	}
+	rc = ops->read_is_device_unlocked(ops, &unlocked);
+	avb_ops_free(ops);
+	if (rc != AVB_IO_RESULT_OK) {
+		fastboot_fail("cannot read the device lock state", response);
+		return;
+	}
+	fastboot_okay(unlocked ? "yes" : "no", response);
+}
+#else
+static void __maybe_unused getvar_unlocked(char *var_parameter, char *response)
+{
+}
+#endif
