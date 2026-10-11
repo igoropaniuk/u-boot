@@ -608,6 +608,17 @@ config BOOTMETH_ANDROID
 	  Note that only MMC bootdevs are supported at present. This is caused
 	  by AVB being limited to MMC devices only.
 
+config BOOTMETH_ANDROID_MEMTAG_DEFAULT
+	bool "Enable Arm MTE by default on Android"
+	depends on BOOTMETH_ANDROID && ARM64
+	help
+	  Whether the kernel is booted with the Arm Memory Tagging Extension
+	  enabled when the OS has not asked for a specific mode in the misc
+	  partition (misc_memtag_message, written by mtectrl). Select this on
+	  MTE capable devices that ship with MTE on; the OS can still turn it
+	  off with MISC_MEMTAG_MODE_MEMTAG_OFF. Without it the bootloader
+	  passes arm64.nomte unless the OS asked for MTE.
+
 config BOOTMETH_CROS
 	bool "Bootdev support for Chromium OS"
 	depends on X86 || ARM || SANDBOX

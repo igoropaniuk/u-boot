@@ -10,6 +10,7 @@
 #include <android_ab.h>
 #include <android_bootloader_message.h>
 #include <android_image.h>
+#include <android_misc.h>
 #if CONFIG_IS_ENABLED(AVB_VERIFY)
 #include <avb_verify.h>
 #endif
@@ -216,6 +217,82 @@ static int android_read_slot_from_bcb(struct bootflow *bflow, bool decrement)
 	return 0;
 }
 
+/**
+ * configure_misc_messages() - Act on the OS messages in the misc system space
+ *
+ * Arm MTE (misc_memtag_message, written by mtectrl): the bootloader decides
+ * whether the kernel runs with MTE from the requested mode and clears the
+ * one-shot bits, see the Android "MTE bootloader support" documentation.
+ * Kernel command line flags (misc_kcmdline_message): the Rust binder
+ * driver is selected with binder.impl=rust.
+ *
+ * Neither message being present is the normal state of a device that never
+ * used these features.
+ *
+ * @bflow: Bootflow to add the command line arguments to
+ * @desc: Device holding the misc partition
+ * @misc: The misc partition
+ * Return: 0 if OK, negative errno on failure
+ */
+static int configure_misc_messages(struct bootflow *bflow,
+				   struct blk_desc *desc,
+				   const struct disk_partition *misc)
+{
+	u32 mode;
+	u64 flags;
+	int ret;
+
+	ret = android_misc_read_memtag(desc, misc, &mode);
+	if (!ret) {
+		bool memtag, memtag_kernel;
+
+		/*
+		 * MEMTAG_OFF overrides the device default; MEMTAG and
+		 * MEMTAG_ONCE enable it for userspace, MEMTAG_KERNEL and
+		 * MEMTAG_KERNEL_ONCE for the kernel (KASAN hardware tags).
+		 */
+		memtag = (mode & (MISC_MEMTAG_MODE_MEMTAG |
+				  MISC_MEMTAG_MODE_MEMTAG_ONCE)) ||
+			 (IS_ENABLED(CONFIG_BOOTMETH_ANDROID_MEMTAG_DEFAULT) &&
+			  !(mode & MISC_MEMTAG_MODE_MEMTAG_OFF));
+		memtag_kernel = mode & (MISC_MEMTAG_MODE_MEMTAG_KERNEL |
+					MISC_MEMTAG_MODE_MEMTAG_KERNEL_ONCE);
+		log_debug("memtag mode %x: memtag %d kernel %d\n", mode,
+			  memtag, memtag_kernel);
+		if (!memtag) {
+			ret = bootflow_cmdline_set_arg(bflow, "arm64.nomte",
+						       BOOTFLOWCL_EMPTY, false);
+			if (ret < 0)
+				return log_msg_ret("nomte", ret);
+		}
+		ret = bootflow_cmdline_set_arg(bflow, "kasan",
+					       memtag_kernel ? "on" : "off",
+					       false);
+		if (ret < 0)
+			return log_msg_ret("kasan", ret);
+
+		ret = android_misc_clear_memtag_once(desc, misc);
+		if (ret)
+			log_warning("cannot clear the one-shot MTE bits: %d\n", ret);
+	} else if (ret != -ENOENT) {
+		return log_msg_ret("memtag", ret);
+	}
+
+	ret = android_misc_read_kcmdline(desc, misc, &flags);
+	if (!ret) {
+		if (flags & MISC_KCMDLINE_BINDER_RUST) {
+			ret = bootflow_cmdline_set_arg(bflow, "binder.impl",
+						       "rust", false);
+			if (ret < 0)
+				return log_msg_ret("binder", ret);
+		}
+	} else if (ret != -ENOENT) {
+		return log_msg_ret("kcmdline", ret);
+	}
+
+	return 0;
+}
+
 static int configure_serialno(struct bootflow *bflow)
 {
 	char *serialno = env_get("serial#");
@@ -345,6 +422,7 @@ static int android_read_bootflow(struct udevice *dev, struct bootflow *bflow)
 	 */
 	configure_serialno(bflow);
 	configure_bootloader_version(bflow);
+	configure_misc_messages(bflow, desc, &misc);
 
 	if (priv->boot_mode == ANDROID_BOOT_MODE_NORMAL && priv->slot) {
 		ret = bootflow_cmdline_set_arg(bflow, "androidboot.force_normal_boot",
