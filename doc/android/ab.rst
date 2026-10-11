@@ -71,8 +71,34 @@ A/B metadata is organized according to AOSP reference [2]_. On the first system
 start with A/B enabled, when ``misc`` partition doesn't contain required data,
 the default A/B metadata will be created and written to ``misc`` partition.
 
+Virtual A/B
+-----------
+
+With Virtual A/B [3]_ the updated slot is written as snapshots in
+``userdata`` and merged into the ``super`` partition after the first
+successful boot of the new slot. The boot control HAL records the merge
+status in the system space of ``misc`` (``struct misc_virtual_ab_message``,
+offset 32 KiB) and the bootloader has to respect it:
+
+* while the status is ``MERGING``, ``ab_select_slot()`` boots the slot the
+  merge was started from (``source_slot``) whatever the slot metadata says,
+  and ``ab_set_active_slot()`` (fastboot ``set_active``) is refused;
+* while it is ``SNAPSHOTTED`` or ``MERGING``, fastboot refuses to erase
+  ``userdata`` and ``metadata``.
+
+``ab_get_merge_status()`` reads the status, ``ab_get_control()`` gives
+read-only access to the metadata (for the fastboot ``slot-*`` variables and
+for the bootmeth, which only stores new rollback indexes once the slot is
+marked successful).
+
+The same system space carries the MTE (``misc_memtag_message``) and kernel
+command line (``misc_kcmdline_message``) requests of the OS; the Android
+bootmeth applies them (``arm64.nomte``, ``kasan=``, ``binder.impl=rust``),
+see ``boot/android_misc.c``.
+
 References
 ----------
 
 .. [1] https://source.android.com/devices/tech/ota/ab
-.. [2] https://android.googlesource.com/platform/bootable/recovery/+/refs/tags/android-10.0.0_r25/bootloader_message/include/bootloader_message/bootloader_message.h
+.. [2] https://android.googlesource.com/platform/bootable/recovery/+/refs/heads/main/bootloader_message/include/bootloader_message/bootloader_message.h
+.. [3] https://source.android.com/docs/core/ota/virtual_ab
