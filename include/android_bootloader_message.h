@@ -27,11 +27,15 @@
 // 0   - 2K     For bootloader_message
 // 2K  - 16K    Used by Vendor's bootloader (the 2K - 4K range may be optionally used
 //              as bootloader_message_ab struct)
-// 16K - 64K    Used by uncrypt and recovery to store wipe_package for A/B devices
+// 16K - 32K    Used by uncrypt and recovery to store wipe_package for A/B devices
+// 32K - 64K    System space, used for miscellanious AOSP features. See below.
 // Note that these offsets are admitted by bootloader,recovery and uncrypt, so they
 // are not configurable without changing all of them.
 static const size_t BOOTLOADER_MESSAGE_OFFSET_IN_MISC = 0;
+static const size_t VENDOR_SPACE_OFFSET_IN_MISC = 2 * 1024;
 static const size_t WIPE_PACKAGE_OFFSET_IN_MISC = 16 * 1024;
+static const size_t SYSTEM_SPACE_OFFSET_IN_MISC = 32 * 1024;
+static const size_t SYSTEM_SPACE_SIZE_IN_MISC = 32 * 1024;
 
 /* Bootloader Message (2-KiB)
  *
@@ -80,6 +84,98 @@ struct bootloader_message {
     // to 2048-byte.
     char reserved[1184];
 };
+
+// Holds Virtual A/B merge status information. Current version is 1. New fields
+// must be added to the end.
+struct misc_virtual_ab_message {
+  uint8_t version;
+  uint32_t magic;
+  uint8_t merge_status;  // IBootControl 1.1, MergeStatus enum.
+  uint8_t source_slot;   // Slot number when merge_status was written.
+  uint8_t reserved[57];
+} __attribute__((packed));
+
+struct misc_memtag_message {
+  uint8_t version;
+  uint32_t magic; // magic string for treble compat
+  uint32_t memtag_mode;
+  uint8_t reserved[55];
+} __attribute__((packed));
+
+struct misc_kcmdline_message {
+  uint8_t version;
+  uint32_t magic;
+  uint64_t kcmdline_flags;
+  uint8_t reserved[51];
+} __attribute__((packed));
+
+// holds generic platform info, managed by misctrl
+struct misc_control_message {
+  uint8_t version;
+  uint32_t magic;
+  uint64_t misctrl_flags;
+  uint8_t reserved[51];
+} __attribute__((packed));
+
+#define MISC_VIRTUAL_AB_MESSAGE_VERSION 2
+#define MISC_VIRTUAL_AB_MAGIC_HEADER 0x56740AB0
+
+/* IBootControl MergeStatus (hardware/interfaces/boot) */
+#define MISC_VIRTUAL_AB_MERGE_STATUS_NONE 0
+#define MISC_VIRTUAL_AB_MERGE_STATUS_UNKNOWN 1
+#define MISC_VIRTUAL_AB_MERGE_STATUS_SNAPSHOTTED 2
+#define MISC_VIRTUAL_AB_MERGE_STATUS_MERGING 3
+#define MISC_VIRTUAL_AB_MERGE_STATUS_CANCELLED 4
+
+#define MISC_MEMTAG_MESSAGE_VERSION 1
+#define MISC_MEMTAG_MAGIC_HEADER 0x5afefe5a
+#define MISC_MEMTAG_MODE_MEMTAG 0x1
+#define MISC_MEMTAG_MODE_MEMTAG_ONCE 0x2
+#define MISC_MEMTAG_MODE_MEMTAG_KERNEL 0x4
+#define MISC_MEMTAG_MODE_MEMTAG_KERNEL_ONCE 0x8
+#define MISC_MEMTAG_MODE_MEMTAG_OFF 0x10
+// This is set when the state was overridden forcibly. This does not need to be
+// interpreted by the bootloader but is only for bookkeeping purposes so
+// userspace knows what to do when the override is undone.
+// See system/extras/mtectrl in AOSP for more information.
+#define MISC_MEMTAG_MODE_FORCED 0x20
+
+#define MISC_KCMDLINE_MESSAGE_VERSION 1
+#define MISC_KCMDLINE_MAGIC_HEADER 0x6ab5110c
+#define MISC_KCMDLINE_BINDER_RUST 0x1
+
+#define MISC_CONTROL_MESSAGE_VERSION 1
+#define MISC_CONTROL_MAGIC_HEADER 0x736d6f72
+#define MISC_CONTROL_16KB_BEFORE 0x1
+
+#ifndef __UBOOT__
+#if (__STDC_VERSION__ >= 201112L) || defined(__cplusplus)
+static_assert(sizeof(struct misc_virtual_ab_message) == 64,
+              "struct misc_virtual_ab_message has wrong size");
+static_assert(sizeof(struct misc_memtag_message) == 64,
+              "struct misc_memtag_message has wrong size");
+static_assert(sizeof(struct misc_kcmdline_message) == 64,
+              "struct misc_kcmdline_message has wrong size");
+static_assert(sizeof(struct misc_control_message) == 64,
+              "struct misc_control_message has wrong size");
+#endif
+#endif /* __UBOOT__ */
+
+// This struct is not meant to be used directly, rather, it is to make
+// computation of offsets easier. New fields must be added to the end.
+struct misc_system_space_layout {
+  struct misc_virtual_ab_message virtual_ab_message;
+  struct misc_memtag_message memtag_message;
+  struct misc_kcmdline_message kcmdline_message;
+  struct misc_control_message control_message;
+} __attribute__((packed));
+
+#ifndef __UBOOT__
+#if (__STDC_VERSION__ >= 201112L) || defined(__cplusplus)
+static_assert(sizeof(struct misc_system_space_layout) % 64 == 0,
+              "prefer to extend by 64 byte chunks, for consistency");
+#endif
+#endif /* __UBOOT__ */
 
 /**
  * We must be cautious when changing the bootloader_message struct size,
