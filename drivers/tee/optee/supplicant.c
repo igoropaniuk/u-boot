@@ -79,6 +79,9 @@ void optee_suppl_cmd(struct udevice *dev, struct tee_shm *shm_arg,
 
 	priv->in_supplicant++;
 	switch (arg->cmd) {
+	case OPTEE_MSG_RPC_CMD_LOAD_TA:
+		optee_suppl_cmd_load_ta(arg);
+		break;
 	case OPTEE_MSG_RPC_CMD_SHM_ALLOC:
 		cmd_shm_alloc(dev, arg, page_list);
 		break;
