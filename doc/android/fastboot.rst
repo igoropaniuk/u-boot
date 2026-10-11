@@ -18,7 +18,11 @@ The current implementation supports the following standard commands:
 - ``getvar``
 - ``reboot``
 - ``reboot-bootloader``
-- ``set_active`` (only a stub implementation which always succeeds)
+- ``set_active`` (with ``CONFIG_FASTBOOT_AB``: updates the A/B metadata in
+  ``misc`` like the boot control HAL, refused while a Virtual A/B update is
+  merging; a stub which always succeeds otherwise)
+- ``flashing lock``, ``flashing unlock``, ``flashing get_unlock_ability``
+  (if enabled, see :doc:`avb2`)
 - ``ucmd`` (if enabled)
 - ``acmd`` (if enabled)
 
@@ -33,6 +37,14 @@ The following OEM commands are supported (if enabled):
 - ``oem board`` - this executes a custom board function which is defined by the vendor
 
 Support for eMMC, NAND and SPI flash memory devices is included.
+
+With ``CONFIG_FASTBOOT_AB`` the A/B variables come from the bootloader
+control block in ``misc``: ``current-slot``, ``slot-count``,
+``slot-successful:<slot>``, ``slot-unbootable:<slot>``,
+``slot-retry-count:<slot>`` and ``snapshot-update-status`` (``none``,
+``snapshotted`` or ``merging``). Erasing ``userdata`` or ``metadata`` is
+refused while an update is snapshotted or merging, since the update lives
+there.
 
 Client installation
 -------------------
