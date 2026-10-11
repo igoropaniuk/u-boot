@@ -1385,9 +1385,10 @@ int booti_run(struct bootm_info *bmi)
 	return boot_run(bmi, "booti", 0);
 }
 
-int bootm_boot_start(ulong addr, const char *cmdline)
+int bootm_boot_start_fdt(ulong addr, const char *cmdline, ulong fdt_addr)
 {
 	char addr_str[30];
+	char fdt_str[30];
 	struct bootm_info bmi;
 	int states;
 	int ret;
@@ -1411,10 +1412,19 @@ int bootm_boot_start(ulong addr, const char *cmdline)
 	}
 	bootm_init(&bmi);
 	bmi.addr_img = addr_str;
+	if (fdt_addr) {
+		snprintf(fdt_str, sizeof(fdt_str), "%lx", fdt_addr);
+		bmi.conf_fdt = fdt_str;
+	}
 	bmi.cmd_name = "bootm";
 	ret = bootm_run_states(&bmi, states);
 
 	return ret;
+}
+
+int bootm_boot_start(ulong addr, const char *cmdline)
+{
+	return bootm_boot_start_fdt(addr, cmdline, 0);
 }
 
 void bootm_init(struct bootm_info *bmi)
