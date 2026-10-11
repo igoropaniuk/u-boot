@@ -21,6 +21,9 @@
 #if CONFIG_IS_ENABLED(FASTBOOT_CMD_FLASHING)
 #include <avb_verify.h>
 #endif
+#if CONFIG_IS_ENABLED(FASTBOOT_AB)
+#include <fb_ab.h>
+#endif
 
 #define BOOT_PARTITION_NAME "boot"
 
@@ -503,6 +506,13 @@ void fastboot_mmc_erase(const char *cmd, char *response)
 		fastboot_flashing_custom_key(NULL, 0, response);
 		return;
 	}
+#endif
+
+#if CONFIG_IS_ENABLED(FASTBOOT_AB)
+	/* a Virtual A/B update in progress lives in userdata and metadata */
+	if ((!strcmp(cmd, "userdata") || !strcmp(cmd, "metadata")) &&
+	    fastboot_ab_update_in_progress(response))
+		return;
 #endif
 
 #ifdef CONFIG_FASTBOOT_MMC_BOOT_SUPPORT

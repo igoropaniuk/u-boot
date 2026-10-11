@@ -4,6 +4,10 @@
  */
 
 #include <env.h>
+#if IS_ENABLED(CONFIG_FASTBOOT_AB)
+#include <android_bootloader_message.h>
+#include <fb_ab.h>
+#endif
 #include <fastboot.h>
 #include <fastboot-internal.h>
 #include <fb_mmc.h>
@@ -25,6 +29,11 @@ static void getvar_product(char *var_parameter, char *response);
 static void getvar_platform(char *var_parameter, char *response);
 static void getvar_current_slot(char *var_parameter, char *response);
 static void getvar_has_slot(char *var_parameter, char *response);
+static void getvar_slot_count(char *var_parameter, char *response);
+static void getvar_slot_successful(char *slot, char *response);
+static void getvar_slot_unbootable(char *slot, char *response);
+static void getvar_slot_retry_count(char *slot, char *response);
+static void getvar_snapshot_update_status(char *var_parameter, char *response);
 static void getvar_partition_type(char *part_name, char *response);
 static void getvar_partition_size(char *part_name, char *response);
 static void getvar_is_userspace(char *var_parameter, char *response);
@@ -71,6 +80,28 @@ static const struct {
 		.variable = "current-slot",
 		.dispatch = getvar_current_slot,
 		.list = true
+#if IS_ENABLED(CONFIG_FASTBOOT_AB)
+	}, {
+		.variable = "slot-count",
+		.dispatch = getvar_slot_count,
+		.list = true
+	}, {
+		.variable = "slot-successful",
+		.dispatch = getvar_slot_successful,
+		.list = false
+	}, {
+		.variable = "slot-unbootable",
+		.dispatch = getvar_slot_unbootable,
+		.list = false
+	}, {
+		.variable = "slot-retry-count",
+		.dispatch = getvar_slot_retry_count,
+		.list = false
+	}, {
+		.variable = "snapshot-update-status",
+		.dispatch = getvar_snapshot_update_status,
+		.list = true
+#endif
 #if IS_ENABLED(CONFIG_FASTBOOT_FLASH)
 	}, {
 		.variable = "has-slot",
@@ -198,11 +229,135 @@ static void getvar_platform(char *var_parameter, char *response)
 		fastboot_fail("platform not set", response);
 }
 
+#if IS_ENABLED(CONFIG_FASTBOOT_AB)
+static void getvar_current_slot(char *var_parameter, char *response)
+{
+	struct bootloader_control abc;
+	char slot[2] = "a";
+
+	if (fastboot_ab_get_control(&abc, response))
+		return;
+
+	/* slot_suffix is "_a"; an unset one means the first slot */
+	if (abc.slot_suffix[0] == '_' && abc.slot_suffix[1])
+		slot[0] = abc.slot_suffix[1];
+	fastboot_okay(slot, response);
+}
+
+static void getvar_slot_count(char *var_parameter, char *response)
+{
+	struct bootloader_control abc;
+	char str[4];
+
+	if (fastboot_ab_get_control(&abc, response))
+		return;
+
+	snprintf(str, sizeof(str), "%u", abc.nb_slot);
+	fastboot_okay(str, response);
+}
+
+/**
+ * getvar_slot_info() - Look up the metadata of a slot given by name
+ *
+ * @slot: Slot name from the variable ("a", "b", "_a", ...)
+ * @info: Returns the slot metadata
+ * @response: Pointer to fastboot response buffer, filled on failure
+ * Return: 0 on success, -1 on failure
+ */
+static int getvar_slot_info(const char *slot, struct slot_metadata *info,
+			    char *response)
+{
+	struct bootloader_control abc;
+	int index = fastboot_ab_slot_index(slot);
+
+	if (index < 0) {
+		fastboot_fail("invalid slot", response);
+		return -1;
+	}
+	if (fastboot_ab_get_control(&abc, response))
+		return -1;
+	if (index >= abc.nb_slot) {
+		fastboot_fail("no such slot", response);
+		return -1;
+	}
+	*info = abc.slot_info[index];
+
+	return 0;
+}
+
+static void getvar_slot_successful(char *slot, char *response)
+{
+	struct slot_metadata info;
+
+	if (getvar_slot_info(slot, &info, response))
+		return;
+	fastboot_okay(info.successful_boot ? "yes" : "no", response);
+}
+
+static void getvar_slot_unbootable(char *slot, char *response)
+{
+	struct slot_metadata info;
+
+	if (getvar_slot_info(slot, &info, response))
+		return;
+	/* unbootable: no priority, corrupted, or out of tries without success */
+	fastboot_okay(!info.priority || info.verity_corrupted ||
+		      (!info.tries_remaining && !info.successful_boot) ?
+		      "yes" : "no", response);
+}
+
+static void getvar_slot_retry_count(char *slot, char *response)
+{
+	struct slot_metadata info;
+	char str[4];
+
+	if (getvar_slot_info(slot, &info, response))
+		return;
+	snprintf(str, sizeof(str), "%u", info.tries_remaining);
+	fastboot_okay(str, response);
+}
+
+static void getvar_snapshot_update_status(char *var_parameter, char *response)
+{
+	switch (fastboot_ab_merge_status()) {
+	case MISC_VIRTUAL_AB_MERGE_STATUS_SNAPSHOTTED:
+		fastboot_okay("snapshotted", response);
+		break;
+	case MISC_VIRTUAL_AB_MERGE_STATUS_MERGING:
+		fastboot_okay("merging", response);
+		break;
+	default:
+		fastboot_okay("none", response);
+	}
+}
+#else
 static void getvar_current_slot(char *var_parameter, char *response)
 {
 	/* A/B not implemented, for now always return "a" */
 	fastboot_okay("a", response);
 }
+
+static void __maybe_unused getvar_slot_count(char *var_parameter, char *response)
+{
+}
+
+static void __maybe_unused getvar_slot_successful(char *slot, char *response)
+{
+}
+
+static void __maybe_unused getvar_slot_unbootable(char *slot, char *response)
+{
+}
+
+static void __maybe_unused getvar_slot_retry_count(char *slot, char *response)
+{
+}
+
+static void __maybe_unused getvar_snapshot_update_status(char *var_parameter,
+							 char *response)
+{
+}
+#endif
 
 static void __maybe_unused getvar_has_slot(char *part_name, char *response)
 {
