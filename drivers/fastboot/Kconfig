@@ -248,6 +248,18 @@ config FASTBOOT_MBR_NAME
 	  specified on the "fastboot flash" command line matches the value
 	  defined here. The default target name for updating MBR is "mbr".
 
+config FASTBOOT_AB
+	bool "Enable the A/B slot commands and variables"
+	depends on FASTBOOT_FLASH_MMC && ANDROID_AB
+	default y
+	help
+	  Implement "set_active" and the current-slot, slot-count,
+	  slot-successful, slot-unbootable, slot-retry-count and
+	  snapshot-update-status variables on the bootloader control block
+	  in the misc partition, as the Android boot control HAL does.
+	  Erasing userdata or metadata and switching slots are refused while
+	  a Virtual A/B update is snapshotted or merging.
+
 config FASTBOOT_CMD_FLASHING
 	bool "Enable the 'flashing lock/unlock/get_unlock_ability' commands"
 	depends on FASTBOOT_FLASH && AVB_VERIFY && OPTEE_TA_AVB

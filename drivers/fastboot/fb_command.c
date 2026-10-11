@@ -6,6 +6,9 @@
 #include <command.h>
 #include <console.h>
 #include <env.h>
+#if CONFIG_IS_ENABLED(FASTBOOT_AB)
+#include <fb_ab.h>
+#endif
 #include <fastboot.h>
 #include <fastboot-internal.h>
 #include <fb_block.h>
@@ -40,6 +43,7 @@ static u32 fastboot_bytes_expected;
 
 static void okay(char *, char *);
 static void boot_image(char *, char *);
+static void set_active(char *, char *);
 static void getvar(char *, char *);
 static void download(char *, char *);
 static void flash(char *, char *);
@@ -109,7 +113,7 @@ static const struct {
 	},
 	[FASTBOOT_COMMAND_SET_ACTIVE] =  {
 		.command = "set_active",
-		.dispatch = okay
+		.dispatch = CONFIG_IS_ENABLED(FASTBOOT_AB, (set_active), (okay))
 	},
 	[FASTBOOT_COMMAND_OEM_FORMAT] = {
 		.command = "oem format",
@@ -234,6 +238,23 @@ void fastboot_multiresponse(int cmd, char *response)
  * valid, but all the work is done after the response has been sent (e.g.
  * boot, reboot etc.)
  */
+#if CONFIG_IS_ENABLED(FASTBOOT_AB)
+/**
+ * set_active() - make a slot the one to boot next
+ *
+ * @cmd_parameter: the slot name ("a", "b", ...)
+ * @response: pointer to fastboot response buffer
+ */
+static void set_active(char *cmd_parameter, char *response)
+{
+	fastboot_ab_set_active(cmd_parameter, response);
+}
+#else
+static void __maybe_unused set_active(char *cmd_parameter, char *response)
+{
+}
+#endif
+
 static void okay(char *cmd_parameter, char *response)
 {
 	fastboot_okay(NULL, response);
