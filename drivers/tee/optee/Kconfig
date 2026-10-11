@@ -38,6 +38,66 @@ config OPTEE_TA_SCP03
 	  Enables support for controlling (enabling, provisioning) the
 	  Secure Channel Protocol 03 operation in the OP-TEE SCP03 TA.
 
+config OPTEE_LOAD_TA
+	bool "Load Trusted Applications on request from OP-TEE"
+	help
+	  Handle the OPTEE_MSG_RPC_CMD_LOAD_TA request from OP-TEE, which is
+	  issued when a session is opened to a Trusted Application (TA) that
+	  is not built into the OP-TEE image as an early TA. This is the part
+	  of the Linux tee-supplicant that locates TA binaries.
+
+	  U-Boot only supplies the TA binary. OP-TEE verifies its signature
+	  before loading it, so the storage the TA is read from does not need
+	  to be trusted. Secure storage on the normal world filesystem (REE
+	  FS) is not provided; TAs that need persistent storage must use RPMB,
+	  and OP-TEE must keep its TA version database there as well
+	  (CFG_TA_VERSION_DB_RPMB=y), see doc/README.tee.
+
+if OPTEE_LOAD_TA
+
+config OPTEE_LOAD_TA_FIT
+	bool "Look up TAs in a FIT image in memory"
+	depends on FIT
+	help
+	  Look for TAs in a FIT image already present in memory. The address
+	  of the FIT image is read from the "optee_ta_fit" environment
+	  variable. Each TA is a sub-image under /images whose node name is
+	  the UUID of the TA in standard textual form, for example
+	  "8aaaf200-2450-11e4-abe2-0002a5d5c51b". Hashes and signatures
+	  attached to the sub-image are verified before the TA is handed to
+	  OP-TEE.
+
+config OPTEE_LOAD_TA_FS
+	bool "Look up TAs in a filesystem"
+	default y
+	help
+	  Look for TAs as "<uuid>.ta" files in a directory on a block device,
+	  the same layout that the Linux tee-supplicant uses in
+	  /lib/optee_armtz. The device and directory default to the values
+	  of the OPTEE_LOAD_TA_FS_* options below and can be overridden at
+	  runtime with the "optee_ta_fs_iface", "optee_ta_fs_dev_part" and
+	  "optee_ta_fs_dir" environment variables.
+
+config OPTEE_LOAD_TA_FS_IFACE
+	string "Block device interface holding the TAs"
+	default "mmc"
+	help
+	  Interface name as used by the "load" command, for example "mmc",
+	  "usb" or "virtio".
+
+config OPTEE_LOAD_TA_FS_DEV_PART
+	string "Device and partition holding the TAs"
+	default "0:1"
+	help
+	  Device number and partition as used by the "load" command, for
+	  example "0:1".
+
+config OPTEE_LOAD_TA_FS_DIR
+	string "Directory holding the TAs"
+	default "/lib/optee_armtz"
+
+endif
+
 config OPTEE_SERVICE_DISCOVERY
 	bool "OP-TEE service discovery"
 	default y

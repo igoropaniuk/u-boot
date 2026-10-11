@@ -97,6 +97,52 @@ RPC (Remote Procedure Call) are requests from secure world to the driver.
 An RPC is identified by a special range of SMCCC return values from
 OPTEE_SMC_CALL_WITH_ARG.
 
+Loading Trusted Applications
+============================
+
+A session can only be opened to a Trusted Application (TA) that OP-TEE can
+find. TAs built into the OP-TEE image (early TAs) and pseudo TAs are always
+available. Any other TA has to be supplied by the normal world: OP-TEE sends
+the OPTEE_MSG_RPC_CMD_LOAD_TA request, first to learn the size of the TA
+binary and then again with a shared memory buffer to copy it into. In Linux
+this request is served by tee-supplicant from /lib/optee_armtz.
+
+With CONFIG_OPTEE_LOAD_TA the OP-TEE driver serves this request itself, so a
+TA can be updated without rebuilding OP-TEE. U-Boot only provides the bytes
+of the TA binary. OP-TEE verifies the signature of the binary against its
+trusted key before loading it, and version checks for anti-rollback are kept
+in secure storage, so the storage the TA is read from does not have to be
+trusted. Two sources are available and tried in this order:
+
+- CONFIG_OPTEE_LOAD_TA_FIT looks in a FIT image already present in memory at
+  the address held by the "optee_ta_fit" environment variable. Each TA is a
+  sub-image under /images whose node name is the UUID of the TA, for example
+  "8aaaf200-2450-11e4-abe2-0002a5d5c51b". Hashes and signatures attached to
+  the sub-image are checked before the TA is handed to OP-TEE. A boot script
+  can load such a FIT image from any storage before the TA is needed::
+
+      load mmc 0:1 ${loadaddr} tas.itb && setenv optee_ta_fit ${loadaddr}
+
+- CONFIG_OPTEE_LOAD_TA_FS looks for "<uuid>.ta" files in a directory on a
+  block device, the layout tee-supplicant uses. The defaults come from
+  CONFIG_OPTEE_LOAD_TA_FS_IFACE, CONFIG_OPTEE_LOAD_TA_FS_DEV_PART and
+  CONFIG_OPTEE_LOAD_TA_FS_DIR and can be overridden with the environment
+  variables "optee_ta_fs_iface", "optee_ta_fs_dev_part" and
+  "optee_ta_fs_dir".
+
+Sessions opened by U-Boot are closed when the TEE device is removed before
+the OS starts, so OP-TEE unloads the TA and the OS tee-supplicant provides
+its own copy afterwards.
+
+Secure storage on the normal world filesystem (OPTEE_MSG_RPC_CMD_FS) is not
+provided by U-Boot. A TA that needs persistent storage while U-Boot runs must
+use RPMB, which is served when CONFIG_SUPPORT_EMMC_RPMB is enabled. This also
+applies to OP-TEE itself: before it runs a TA loaded this way it records the
+TA version in its anti-rollback database, which by default lives in the
+normal world filesystem. OP-TEE has to be built with CFG_TA_VERSION_DB_RPMB=y
+(or without CFG_REE_FS) for that database to be kept in RPMB, otherwise
+opening the session fails with TEE_ERROR_STORAGE_NOT_AVAILABLE.
+
 References
 ==========
 
