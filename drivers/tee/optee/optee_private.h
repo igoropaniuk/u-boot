@@ -103,6 +103,25 @@ static inline void optee_suppl_cmd_i2c_transfer(struct optee_msg_arg *arg)
 }
 #endif
 
+#ifdef CONFIG_OPTEE_LOAD_TA
+/**
+ * optee_suppl_cmd_load_ta() - provide the binary of a Trusted Application
+ * @arg:	OP-TEE message holding the UUID of the TA and, on the second
+ *		request, the shared memory to copy the TA binary into
+ *
+ * Looks up the TA in the enabled TA sources (FIT image, filesystem) and
+ * reports its size or copies it into the supplied buffer. OP-TEE verifies
+ * the signature of the binary before loading it.
+ */
+void optee_suppl_cmd_load_ta(struct optee_msg_arg *arg);
+#else
+static inline void optee_suppl_cmd_load_ta(struct optee_msg_arg *arg)
+{
+	debug("OPTEE_MSG_RPC_CMD_LOAD_TA not implemented\n");
+	arg->ret = TEE_ERROR_NOT_IMPLEMENTED;
+}
+#endif
+
 void *optee_alloc_and_init_page_list(void *buf, ulong len, u64 *phys_buf_ptr);
 
 #endif /* __OPTEE_PRIVATE_H */
