@@ -25,6 +25,17 @@ enum avb_boot_state {
 
 #define AVB_MAX_PRELOADED	4
 
+/*
+ * Persistent value holding the user-provisioned root key ("custom key"):
+ * a vbmeta signed by it verifies with the boot state yellow instead of
+ * green. Provisioned with "fastboot flash avb_custom_key <key blob>" and
+ * removed with "fastboot erase avb_custom_key"; the blob is the output of
+ * "avbtool extract_public_key".
+ */
+#define AVB_CUSTOM_KEY_PVALUE	"avb_custom_key"
+/* AvbRSAPublicKeyHeader + 2 * 8192-bit modulus */
+#define AVB_CUSTOM_KEY_MAX_SIZE	(8 + 2 * 1024)
+
 /**
  * struct avb_preloaded - a partition already loaded into memory by the caller
  *
@@ -48,6 +59,8 @@ struct AvbOpsData {
 	enum uclass_id uclass_id;
 	int dev_num;
 	enum avb_boot_state boot_state;
+	/* the vbmeta key matched the custom key, not the root key */
+	bool custom_key_used;
 #ifdef CONFIG_OPTEE_TA_AVB
 	struct udevice *tee;
 	u32 session;
@@ -83,8 +96,28 @@ int avb_ops_add_preloaded(AvbOps *ops, const char *partition, void *addr,
 			  size_t size, size_t max_size);
 #ifdef CONFIG_OPTEE_TA_AVB
 AvbIOResult avb_write_lock_state(AvbOps *ops, bool locked);
-
 #endif
+
+/**
+ * avb_custom_key_used() - Did the last verification trust the custom key?
+ *
+ * @ops: AvbOps from avb_ops_alloc()
+ * Return: true if the vbmeta signing key was accepted because it matched the
+ *	user-provisioned custom key (yellow boot state), false if it matched
+ *	the root key (green)
+ */
+bool avb_custom_key_used(AvbOps *ops);
+
+/**
+ * avb_write_custom_key() - Provision or remove the custom root key
+ *
+ * @ops: AvbOps from avb_ops_alloc()
+ * @key: public key blob (avbtool extract_public_key format), or NULL to
+ *	remove the custom key
+ * @size: size of @key in bytes, 0 to remove
+ * Return: AVB_IO_RESULT_OK or an error
+ */
+AvbIOResult avb_write_custom_key(AvbOps *ops, const void *key, size_t size);
 
 /**
  * avb_update_rollback_indexes() - Store the rollback indexes of a verified slot

@@ -639,7 +639,9 @@ static int run_avb_verification(struct bootflow *bflow)
 			ret = log_msg_ret("avb verify", -EIO);
 			goto out;
 		}
-		boot_state = AVB_GREEN;
+		/* yellow: verified, but with the user-provisioned custom key */
+		boot_state = avb_custom_key_used(avb_ops) ? AVB_YELLOW :
+			AVB_GREEN;
 	} else {
 		/* When device is unlocked, we also accept verification errors */
 		if (result != AVB_SLOT_VERIFY_RESULT_OK &&

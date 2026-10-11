@@ -18,6 +18,9 @@
 #include <div64.h>
 #include <linux/compat.h>
 #include <android_image.h>
+#if CONFIG_IS_ENABLED(FASTBOOT_CMD_FLASHING)
+#include <avb_verify.h>
+#endif
 
 #define BOOT_PARTITION_NAME "boot"
 
@@ -370,6 +373,14 @@ void fastboot_mmc_flash_write(const char *cmd, void *download_buffer,
 	struct blk_desc *dev_desc;
 	struct disk_partition info = {0};
 
+#if CONFIG_IS_ENABLED(FASTBOOT_CMD_FLASHING)
+	if (!strcmp(cmd, AVB_CUSTOM_KEY_PVALUE)) {
+		fastboot_flashing_custom_key(download_buffer, download_bytes,
+					     response);
+		return;
+	}
+#endif
+
 #ifdef CONFIG_FASTBOOT_MMC_BOOT_SUPPORT
 	if (strcmp(cmd, CONFIG_FASTBOOT_MMC_BOOT1_NAME) == 0) {
 		dev_desc = fastboot_mmc_get_dev(response);
@@ -486,6 +497,13 @@ void fastboot_mmc_erase(const char *cmd, char *response)
 	struct blk_desc *dev_desc;
 	struct disk_partition info;
 	struct mmc *mmc = find_mmc_device(CONFIG_FASTBOOT_FLASH_MMC_DEV);
+
+#if CONFIG_IS_ENABLED(FASTBOOT_CMD_FLASHING)
+	if (!strcmp(cmd, AVB_CUSTOM_KEY_PVALUE)) {
+		fastboot_flashing_custom_key(NULL, 0, response);
+		return;
+	}
+#endif
 
 #ifdef CONFIG_FASTBOOT_MMC_BOOT_SUPPORT
 	if (strcmp(cmd, CONFIG_FASTBOOT_MMC_BOOT1_NAME) == 0) {

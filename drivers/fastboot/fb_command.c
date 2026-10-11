@@ -931,6 +931,39 @@ static void flashing_unlock(char *cmd_parameter, char *response)
 	fastboot_okay(NULL, response);
 }
 
+void fastboot_flashing_custom_key(const void *key, u32 size, char *response)
+{
+	bool unlocked = false;
+	AvbIOResult rc;
+	AvbOps *ops;
+
+	ops = flashing_avb_ops(response);
+	if (!ops)
+		return;
+
+	/* changing the root of trust is only allowed on an unlocked device */
+	rc = ops->read_is_device_unlocked(ops, &unlocked);
+	if (rc != AVB_IO_RESULT_OK) {
+		fastboot_fail("cannot read the device lock state", response);
+		goto out;
+	}
+	if (!unlocked) {
+		fastboot_fail("device is locked", response);
+		goto out;
+	}
+
+	rc = avb_write_custom_key(ops, key, size);
+	if (rc == AVB_IO_RESULT_ERROR_INVALID_VALUE_SIZE)
+		fastboot_fail("key too large", response);
+	else if (rc != AVB_IO_RESULT_OK)
+		fastboot_fail("cannot store the custom key", response);
+	else
+		fastboot_okay(NULL, response);
+
+out:
+	avb_ops_free(ops);
+}
+
 /**
  * flashing_get_unlock_ability() - report whether unlocking is allowed
  */
