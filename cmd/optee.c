@@ -34,6 +34,11 @@ static int hello_world_ta(unsigned int value)
 		printf("tee_open_session(): failed(%d)\n", rc);
 		return rc;
 	}
+	if (session_arg.ret) {
+		printf("tee_open_session(): TEE error 0x%x (origin %u)\n",
+		       session_arg.ret, session_arg.ret_origin);
+		return -EIO;
+	}
 
 	arg.func = TA_HELLO_WORLD_CMD_INC_VALUE;
 	arg.session = session_arg.session;
@@ -43,7 +48,13 @@ static int hello_world_ta(unsigned int value)
 
 	printf("Value before: 0x%x\n", (int)param[0].u.value.a);
 	printf("Calling TA\n");
-	tee_invoke_func(tee, &arg, 1, param);
+	rc = tee_invoke_func(tee, &arg, 1, param);
+	if (rc || arg.ret) {
+		printf("tee_invoke_func(): failed(%d), TEE error 0x%x (origin %u)\n",
+		       rc, arg.ret, arg.ret_origin);
+		tee_close_session(tee, session_arg.session);
+		return rc ? rc : -EIO;
+	}
 
 	printf("Value after: 0x%x\n", (int)param[0].u.value.a);
 	return tee_close_session(tee, session_arg.session);
