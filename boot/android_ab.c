@@ -376,6 +376,40 @@ int ab_select_slot(struct blk_desc *dev_desc, struct disk_partition *part_info,
 	return slot;
 }
 
+int ab_get_control(struct blk_desc *dev_desc,
+		   const struct disk_partition *part_info,
+		   struct bootloader_control *abc)
+{
+	struct bootloader_control *disk_abc;
+	int ret;
+
+	if (!dev_desc || !part_info || !abc)
+		return -EINVAL;
+
+	ret = ab_control_create_from_disk(dev_desc, part_info, &disk_abc, 0);
+	if (ret < 0)
+		return ret;
+
+	ret = -ENODATA;
+	if (disk_abc->crc32_le != ab_control_compute_crc(disk_abc))
+		log_debug("ANDROID: Invalid A/B metadata CRC-32\n");
+	else if (disk_abc->magic != BOOT_CTRL_MAGIC)
+		log_debug("ANDROID: Unknown A/B metadata: %.8x\n", disk_abc->magic);
+	else if (disk_abc->version > BOOT_CTRL_VERSION)
+		log_debug("ANDROID: Unsupported A/B metadata version: %u\n",
+			  disk_abc->version);
+	else if (disk_abc->nb_slot > ARRAY_SIZE(disk_abc->slot_info))
+		log_debug("ANDROID: Wrong number of slots %u\n", disk_abc->nb_slot);
+	else
+		ret = 0;
+
+	if (!ret)
+		memcpy(abc, disk_abc, sizeof(*abc));
+	free(disk_abc);
+
+	return ret;
+}
+
 int ab_dump_abc(struct blk_desc *dev_desc, struct disk_partition *part_info)
 {
 	struct bootloader_control *abc;

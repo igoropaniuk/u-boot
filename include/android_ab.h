@@ -9,6 +9,7 @@
 #include <stdbool.h>
 
 struct blk_desc;
+struct bootloader_control;
 struct disk_partition;
 
 /* Android standard boot slot names are 'a', 'b', 'c', ... */
@@ -35,6 +36,24 @@ struct disk_partition;
  */
 int ab_select_slot(struct blk_desc *dev_desc, struct disk_partition *part_info,
                    bool dec_tries);
+
+/**
+ * ab_get_control() - Read and validate the bootloader control block.
+ *
+ * @dev_desc: Device description pointer
+ * @part_info: Partition information (normally "misc")
+ * @abc: Where to store the bootloader_control (sizeof(struct
+ *	bootloader_control) bytes)
+ *
+ * Reads the A/B metadata without modifying it, for callers that only need
+ * to look at it (slot flags, active slot). A bad CRC, magic or version is
+ * an error, the metadata is not re-initialized.
+ *
+ * Return: 0 on success, or a negative on error
+ */
+int ab_get_control(struct blk_desc *dev_desc,
+		   const struct disk_partition *part_info,
+		   struct bootloader_control *abc);
 
 /**
  * ab_dump_abc() - Dump ABC information for specific partition.

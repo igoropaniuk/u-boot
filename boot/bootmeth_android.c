@@ -8,6 +8,7 @@
 #define LOG_CATEGORY UCLASS_BOOTSTD
 
 #include <android_ab.h>
+#include <android_bootloader_message.h>
 #include <android_image.h>
 #if CONFIG_IS_ENABLED(AVB_VERIFY)
 #include <avb_verify.h>
@@ -472,6 +473,38 @@ static int avb_append_commandline(struct bootflow *bflow, char *cmdline)
 	return 0;
 }
 
+/**
+ * slot_is_known_good() - Whether the selected slot has booted successfully
+ *
+ * With A/B, Android marks a slot successful (boot control HAL) once it has
+ * booted far enough; until then a new update is still on probation. Without
+ * A/B there is no such signal and the slot counts as good.
+ *
+ * @bflow: Bootflow being booted
+ * Return: true if the slot is known good
+ */
+static bool slot_is_known_good(struct bootflow *bflow)
+{
+	struct blk_desc *desc = dev_get_uclass_plat(bflow->blk);
+	struct android_priv *priv = bflow->bootmeth_priv;
+	struct disk_partition misc;
+	struct bootloader_control abc;
+	int slot;
+
+	if (!IS_ENABLED(CONFIG_ANDROID_AB) || !priv->slot)
+		return true;
+
+	slot = priv->slot[0] - 'a';
+	if (part_get_info_by_name(desc, BCB_PART_NAME, &misc) < 0)
+		return false;
+	if (ab_get_control(desc, &misc, &abc) < 0)
+		return false;
+	if (slot < 0 || slot >= abc.nb_slot)
+		return false;
+
+	return abc.slot_info[slot].successful_boot;
+}
+
 static int run_avb_verification(struct bootflow *bflow)
 {
 	struct blk_desc *desc = dev_get_uclass_plat(bflow->blk);
@@ -596,6 +629,21 @@ static int run_avb_verification(struct bootflow *bflow)
 			ret = log_msg_ret("avb cmdline", ret);
 			goto out;
 		}
+	}
+
+	/*
+	 * Rollback protection: libavb only compares the rollback indexes, the
+	 * bootloader stores them. Raise the stored indexes to those of the
+	 * verified images once the slot is known good, so that a bad update
+	 * which never boots cannot lock out the images it replaced.
+	 */
+	if (result == AVB_SLOT_VERIFY_RESULT_OK && slot_is_known_good(bflow)) {
+		AvbIOResult rc;
+
+		rc = avb_update_rollback_indexes(avb_ops, out_data);
+		if (rc != AVB_IO_RESULT_OK)
+			log_warning("rollback indexes not updated: %s\n",
+				    str_avb_io_error(rc));
 	}
 
 	ret = 0;

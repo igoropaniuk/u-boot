@@ -1232,6 +1232,41 @@ __weak AvbIOResult avb_read_root_key_digest(AvbOps *ops, uint8_t *digest)
 }
 #endif
 
+AvbIOResult avb_update_rollback_indexes(AvbOps *ops,
+					const AvbSlotVerifyData *data)
+{
+	AvbIOResult rc;
+	u64 stored;
+	int i;
+
+	/* without the TA there is no store for the indexes (reads give 0) */
+	if (!IS_ENABLED(CONFIG_OPTEE_TA_AVB))
+		return AVB_IO_RESULT_OK;
+
+	if (!ops->read_rollback_index || !ops->write_rollback_index)
+		return AVB_IO_RESULT_ERROR_IO;
+
+	for (i = 0; i < AVB_MAX_NUMBER_OF_ROLLBACK_INDEX_LOCATIONS; i++) {
+		/* unused locations stay 0 and never need an update */
+		if (!data->rollback_indexes[i])
+			continue;
+
+		rc = ops->read_rollback_index(ops, i, &stored);
+		if (rc != AVB_IO_RESULT_OK)
+			return rc;
+		if (stored >= data->rollback_indexes[i])
+			continue;
+
+		printf("Rollback index %d: %llu -> %llu\n", i, stored,
+		       data->rollback_indexes[i]);
+		rc = ops->write_rollback_index(ops, i, data->rollback_indexes[i]);
+		if (rc != AVB_IO_RESULT_OK)
+			return rc;
+	}
+
+	return AVB_IO_RESULT_OK;
+}
+
 /**
  * ============================================================================
  * AVB2.0 AvbOps alloc/initialisation/free
