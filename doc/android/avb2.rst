@@ -130,6 +130,26 @@ meanwhile, the device still completes the operation.
 ``get_unlock_ability`` always reports 1: the "OEM unlocking" setting Android
 keeps in the frp partition is not evaluated.
 
+Custom root key (yellow boot state)
+-----------------------------------
+
+Android lets the owner of an unlocked device install their own root key
+("custom key"): a vbmeta signed by it is then accepted, and the boot state
+is reported as yellow instead of green so that the OS and the user can tell
+the difference. U-Boot keeps the key as the persistent value
+``avb_custom_key`` in the AVB TA and uses it when the vbmeta key is not
+the root key::
+
+   $ avbtool extract_public_key --key my_key.pem --output my_key.bin
+   $ fastboot flashing unlock
+   $ fastboot flash avb_custom_key my_key.bin   # device must be unlocked
+   $ fastboot flashing lock
+   ... boots with androidboot.verifiedbootstate=yellow ...
+   $ fastboot erase avb_custom_key              # back to the root key only
+
+The custom key is checked only after the root key did not match, and only
+when the AVB TA provides persistent values.
+
 AVB 2.0 U-Boot shell commands
 -----------------------------
 

@@ -649,6 +649,74 @@ static AvbIOResult write_to_partition(AvbOps *ops,
  * @return:
  *      AVB_IO_RESULT_OK, if partition was found and read operation succeed
  */
+#ifdef CONFIG_OPTEE_TA_AVB
+static AvbIOResult read_persistent_value(AvbOps *ops, const char *name,
+					 size_t buffer_size, u8 *out_buffer,
+					 size_t *out_num_bytes_read);
+static AvbIOResult write_persistent_value(AvbOps *ops, const char *name,
+					  size_t value_size, const u8 *value);
+
+/**
+ * custom_key_matches() - Compare a vbmeta key with the provisioned custom key
+ *
+ * @ops: AvbOps
+ * @key: public key from the vbmeta image
+ * @len: its size
+ * Return: true if a custom key is provisioned and equals @key
+ */
+static bool custom_key_matches(AvbOps *ops, const u8 *key, size_t len)
+{
+	size_t num_read = 0;
+	bool match = false;
+	u8 *custom;
+
+	if (!len || len > AVB_CUSTOM_KEY_MAX_SIZE)
+		return false;
+
+	custom = malloc(AVB_CUSTOM_KEY_MAX_SIZE);
+	if (!custom)
+		return false;
+
+	if (read_persistent_value(ops, AVB_CUSTOM_KEY_PVALUE,
+				  AVB_CUSTOM_KEY_MAX_SIZE, custom,
+				  &num_read) == AVB_IO_RESULT_OK &&
+	    num_read == len && !avb_safe_memcmp(custom, key, len))
+		match = true;
+
+	free(custom);
+
+	return match;
+}
+#else
+static bool custom_key_matches(AvbOps *ops, const u8 *key, size_t len)
+{
+	return false;
+}
+#endif
+
+bool avb_custom_key_used(AvbOps *ops)
+{
+	return ((struct AvbOpsData *)ops->user_data)->custom_key_used;
+}
+
+AvbIOResult avb_write_custom_key(AvbOps *ops, const void *key, size_t size)
+{
+#ifdef CONFIG_OPTEE_TA_AVB
+	/* an erased key is stored as a single byte no key can match */
+	const u8 none = 0;
+
+	if (size > AVB_CUSTOM_KEY_MAX_SIZE)
+		return AVB_IO_RESULT_ERROR_INVALID_VALUE_SIZE;
+	if (!key || !size)
+		return write_persistent_value(ops, AVB_CUSTOM_KEY_PVALUE,
+					      sizeof(none), &none);
+
+	return write_persistent_value(ops, AVB_CUSTOM_KEY_PVALUE, size, key);
+#else
+	return AVB_IO_RESULT_ERROR_IO;
+#endif
+}
+
 static AvbIOResult validate_vbmeta_public_key(AvbOps *ops,
 					      const u8 *public_key_data,
 					      size_t public_key_length,
@@ -658,6 +726,7 @@ static AvbIOResult validate_vbmeta_public_key(AvbOps *ops,
 					      public_key_metadata_length,
 					      bool *out_key_is_trusted)
 {
+	struct AvbOpsData *ops_data = ops->user_data;
 	u8 key_digest[SHA256_SUM_LEN];
 	u8 trusted_digest[SHA256_SUM_LEN];
 	AvbIOResult rc;
@@ -667,6 +736,7 @@ static AvbIOResult validate_vbmeta_public_key(AvbOps *ops,
 
 	/* Default deny: only flip to trusted on a positive digest match. */
 	*out_key_is_trusted = false;
+	ops_data->custom_key_used = false;
 
 	/* Digest of the key embedded in the (untrusted) vbmeta. */
 	sha256_csum_wd(public_key_data, public_key_length, key_digest,
@@ -677,8 +747,19 @@ static AvbIOResult validate_vbmeta_public_key(AvbOps *ops,
 	if (rc != AVB_IO_RESULT_OK)
 		return rc;
 
-	if (avb_safe_memcmp(key_digest, trusted_digest, sizeof(key_digest)) == 0)
+	if (avb_safe_memcmp(key_digest, trusted_digest, sizeof(key_digest)) == 0) {
 		*out_key_is_trusted = true;
+		return AVB_IO_RESULT_OK;
+	}
+
+	/*
+	 * Not the root key: accept the user-provisioned custom key, the
+	 * bootmeth then reports the yellow boot state.
+	 */
+	if (custom_key_matches(ops, public_key_data, public_key_length)) {
+		*out_key_is_trusted = true;
+		ops_data->custom_key_used = true;
+	}
 
 	return AVB_IO_RESULT_OK;
 }

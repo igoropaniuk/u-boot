@@ -181,6 +181,19 @@ void fastboot_data_download(const void *fastboot_data,
 			    unsigned int fastboot_data_len, char *response);
 
 /**
+ * fastboot_flashing_custom_key() - "flash"/"erase" of the avb_custom_key
+ *
+ * Android provisions the user's root key with "fastboot flash
+ * avb_custom_key <blob>" and removes it with "fastboot erase avb_custom_key".
+ * There is no partition of that name: the key goes to the AVB TA.
+ *
+ * @key: key blob, NULL to erase
+ * @size: size of @key in bytes, 0 to erase
+ * @response: Pointer to fastboot response buffer
+ */
+void fastboot_flashing_custom_key(const void *key, u32 size, char *response);
+
+/**
  * fastboot_data_complete() - Mark current transfer complete
  *
  * @response: Pointer to fastboot response buffer
