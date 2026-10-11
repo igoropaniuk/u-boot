@@ -191,6 +191,99 @@ static int ab_compare_slots(const struct slot_metadata *a,
 	return 0;
 }
 
+int ab_get_merge_status(struct blk_desc *dev_desc,
+			const struct disk_partition *part_info,
+			int *source_slot)
+{
+	struct misc_virtual_ab_message *msg;
+	ulong offset, blocks, ret;
+	int status = MISC_VIRTUAL_AB_MERGE_STATUS_NONE;
+
+	offset = SYSTEM_SPACE_OFFSET_IN_MISC +
+		 offsetof(struct misc_system_space_layout, virtual_ab_message);
+	if (offset % part_info->blksz)
+		return -EINVAL;
+	offset /= part_info->blksz;
+	blocks = DIV_ROUND_UP(sizeof(*msg), part_info->blksz);
+	if (offset + blocks > part_info->size)
+		return -EINVAL;
+
+	msg = malloc_cache_aligned(blocks * part_info->blksz);
+	if (!msg)
+		return -ENOMEM;
+
+	ret = blk_dread(dev_desc, part_info->start + offset, blocks, msg);
+	if (IS_ERR_VALUE(ret) || ret != blocks) {
+		free(msg);
+		return -EIO;
+	}
+
+	if (msg->magic == MISC_VIRTUAL_AB_MAGIC_HEADER &&
+	    msg->version <= MISC_VIRTUAL_AB_MESSAGE_VERSION) {
+		status = msg->merge_status;
+		if (source_slot)
+			*source_slot = msg->source_slot;
+	}
+	free(msg);
+
+	return status;
+}
+
+int ab_set_active_slot(struct blk_desc *dev_desc,
+		       const struct disk_partition *part_info, int slot)
+{
+	struct bootloader_control *abc;
+	int i, ret;
+
+	ret = ab_get_merge_status(dev_desc, part_info, NULL);
+	if (ret < 0)
+		return ret;
+	if (ret == MISC_VIRTUAL_AB_MERGE_STATUS_MERGING) {
+		log_err("ANDROID: a Virtual A/B merge is in progress, slot not changed\n");
+		return -EBUSY;
+	}
+
+	ret = ab_control_create_from_disk(dev_desc, part_info, &abc, 0);
+	if (ret < 0)
+		return ret;
+
+	if (abc->crc32_le != ab_control_compute_crc(abc) ||
+	    abc->magic != BOOT_CTRL_MAGIC || abc->version > BOOT_CTRL_VERSION ||
+	    abc->nb_slot > ARRAY_SIZE(abc->slot_info)) {
+		log_err("ANDROID: Invalid A/B metadata\n");
+		free(abc);
+		return -ENODATA;
+	}
+	if (slot < 0 || slot >= abc->nb_slot) {
+		free(abc);
+		return -EINVAL;
+	}
+
+	/* like libboot_control: the new slot gets a fresh try count */
+	for (i = 0; i < abc->nb_slot; i++) {
+		if (i == slot) {
+			abc->slot_info[i].priority = 15;
+			abc->slot_info[i].tries_remaining = 7;
+			abc->slot_info[i].successful_boot = 0;
+			abc->slot_info[i].verity_corrupted = 0;
+		} else if (abc->slot_info[i].priority >= 15) {
+			abc->slot_info[i].priority = 14;
+		}
+	}
+	memset(abc->slot_suffix, 0, sizeof(abc->slot_suffix));
+	abc->slot_suffix[0] = '_';
+	abc->slot_suffix[1] = BOOT_SLOT_NAME(slot);
+	abc->crc32_le = ab_control_compute_crc(abc);
+
+	ret = ab_control_store(dev_desc, part_info, abc, 0);
+	if (!ret && CONFIG_ANDROID_AB_BACKUP_OFFSET)
+		ret = ab_control_store(dev_desc, part_info, abc,
+				       CONFIG_ANDROID_AB_BACKUP_OFFSET);
+	free(abc);
+
+	return ret;
+}
+
 int ab_select_slot(struct blk_desc *dev_desc, struct disk_partition *part_info,
 		   bool dec_tries)
 {
@@ -310,6 +403,24 @@ int ab_select_slot(struct blk_desc *dev_desc, struct disk_partition *part_info,
 		    ab_compare_slots(&abc->slot_info[i],
 				     &abc->slot_info[slot]) < 0) {
 			slot = i;
+		}
+	}
+
+	/*
+	 * Virtual A/B: while the update engine merges the snapshots of the
+	 * new slot into the super partition, the device must keep booting the
+	 * slot the merge was started from; booting the other slot would leave
+	 * the partitions half merged.
+	 */
+	if (slot >= 0) {
+		int source_slot = slot;
+
+		ret = ab_get_merge_status(dev_desc, part_info, &source_slot);
+		if (ret == MISC_VIRTUAL_AB_MERGE_STATUS_MERGING &&
+		    source_slot != slot && source_slot < abc->nb_slot) {
+			log_err("ANDROID: Virtual A/B merge in progress, booting its source slot %c\n",
+				BOOT_SLOT_NAME(source_slot));
+			slot = source_slot;
 		}
 	}
 
