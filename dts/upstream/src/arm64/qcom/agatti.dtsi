@@ -302,8 +302,18 @@
 		 * OP-TEE (BL32) secure DRAM, 4 MiB TEE RAM + 33 MiB TA RAM:
 		 * must match TF-A's BL32 window and OP-TEE's CFG_TZDRAM_START.
 		 */
-		optee_mem: optee@46200000 {
-			reg = <0x0 0x46200000 0x0 0x2500000>;
+		/*
+		 * TZ-to-modem secure channel page: the modem firmware maps it from
+		 * its own device config and reads the access-control descriptor
+		 * there (magic 0xabcdabc2), so it must not be ordinary RAM.
+		 */
+		modem_secchannel_mem: memory@462c0000 {
+			reg = <0x0 0x462c0000 0x0 0x1000>;
+			no-map;
+		};
+
+		optee_mem: optee@46400000 {
+			reg = <0x0 0x46400000 0x0 0x2500000>;
 			no-map;
 		};
 
