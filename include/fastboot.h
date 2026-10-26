@@ -187,6 +187,14 @@ void fastboot_data_download(const void *fastboot_data,
 void fastboot_data_complete(char *response);
 
 /**
+ * fastboot_data_abort() - Reset the state of an interrupted transfer
+ *
+ * Forget about a download that will never finish, e.g. because the
+ * connection was closed in the middle of the data phase.
+ */
+void fastboot_data_abort(void);
+
+/**
  * fastboot_handle_multiresponse() - Called for each response to send
  *
  * @cmd: Command id that requested multiresponse

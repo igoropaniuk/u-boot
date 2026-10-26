@@ -329,6 +329,23 @@ void fastboot_data_complete(char *response)
 }
 
 /**
+ * fastboot_data_abort() - Reset the state of an interrupted transfer
+ *
+ * Forget about a download that will never finish, e.g. because the
+ * connection was closed in the middle of the data phase. Otherwise the
+ * next session would start with fastboot_data_remaining() non-zero and
+ * treat whatever the client sends first as the rest of the old image.
+ */
+void fastboot_data_abort(void)
+{
+	if (fastboot_bytes_expected)
+		printf("\ndownload aborted after %d of %d bytes\n",
+		       fastboot_bytes_received, fastboot_bytes_expected);
+	fastboot_bytes_expected = 0;
+	fastboot_bytes_received = 0;
+}
+
+/**
  * flash() - write the downloaded image to the indicated partition.
  *
  * @cmd_parameter: Pointer to partition name

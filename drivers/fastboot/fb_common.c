@@ -242,6 +242,7 @@ void fastboot_init(void *buf_addr, u32 buf_size)
 	fastboot_buf_addr = buf_addr ? buf_addr :
 				       (void *)CONFIG_FASTBOOT_BUF_ADDR;
 	fastboot_buf_size = buf_size ? buf_size : CONFIG_FASTBOOT_BUF_SIZE;
+	fastboot_data_abort();
 	fastboot_set_progress_callback(NULL);
 
 }
