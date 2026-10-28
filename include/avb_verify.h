@@ -83,7 +83,23 @@ int avb_ops_add_preloaded(AvbOps *ops, const char *partition, void *addr,
 			  size_t size, size_t max_size);
 #ifdef CONFIG_OPTEE_TA_AVB
 AvbIOResult avb_write_lock_state(AvbOps *ops, bool locked);
+
 #endif
+
+/**
+ * avb_update_rollback_indexes() - Store the rollback indexes of a verified slot
+ *
+ * libavb never writes the rollback indexes: once the bootloader knows the
+ * slot is good (it verified and, with A/B, booted successfully before), it
+ * raises every stored index that is below the one in the slot's vbmeta
+ * images, so that older images are refused from then on.
+ *
+ * @ops: AvbOps from avb_ops_alloc()
+ * @data: result of a successful avb_slot_verify()
+ * Return: AVB_IO_RESULT_OK, or the error of the first failed read or write
+ */
+AvbIOResult avb_update_rollback_indexes(AvbOps *ops,
+					const AvbSlotVerifyData *data);
 void avb_ops_free(AvbOps *ops);
 
 /**
