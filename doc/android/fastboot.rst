@@ -67,10 +67,19 @@ General configuration
 
 The fastboot protocol requires a large memory buffer for
 downloads. This buffer should be as large as possible for a
-platform. The location of the buffer and size are set with
-``CONFIG_FASTBOOT_BUF_ADDR`` and ``CONFIG_FASTBOOT_BUF_SIZE``. These
-may be overridden on the fastboot command line using ``-l`` and
-``-s``.
+platform. The buffer address and size are taken from the following
+sources, each overriding the ones before it:
+
+============  =============================  =============================
+Source        Address                        Size
+============  =============================  =============================
+Build time    ``CONFIG_FASTBOOT_BUF_ADDR``   ``CONFIG_FASTBOOT_BUF_SIZE``
+Environment   ``fastboot_addr_r``, if set    (none)
+Command line  ``-l``                         ``-s``
+============  =============================  =============================
+
+The fastboot client on the host cannot change either: it only reads the
+size, as ``max-download-size``.
 
 Fastboot in SPL
 ^^^^^^^^^^^^^^^
