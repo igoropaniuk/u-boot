@@ -419,6 +419,8 @@ int qcom_geni_load_firmware(phys_addr_t qup_base,
 
 	/* The firmware blob is the private data of the GENI wrapper (parent) */
 	fw = dev_get_priv(dev->parent);
+	if (!fw)
+		return -ENOENT;
 
 	if (IS_ELF(*(Elf32_Ehdr *)fw)) {
 		ret = read_elf(&rsc, fw, &hdr);
