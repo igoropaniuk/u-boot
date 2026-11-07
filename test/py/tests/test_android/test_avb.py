@@ -207,6 +207,47 @@ def test_avb_persistent_values_hex(ubman, avb_device_id):
 
 
 @pytest.mark.buildconfigspec('cmd_avb')
+@pytest.mark.buildconfigspec('optee_ta_avb')
+def test_avb_lock_unlock(ubman, avb_device_id):
+    """Test locking and unlocking the device
+
+    The lock state decides whether AVB accepts verification errors, and the
+    TA resets the rollback indexes on every change of that state.
+    """
+
+    response = ubman.run_command('avb init %x' % avb_device_id)
+    assert response == ''
+
+    try:
+        response = ubman.run_command('avb lock')
+        assert response == 'Device locked, rollback indexes reset'
+
+        response = ubman.run_command('avb is_unlocked')
+        assert response == 'Unlocked = 0'
+
+        # Locking a locked device keeps the rollback indexes
+        response = ubman.run_command('avb write_rb 5 7')
+        assert response == ''
+
+        ubman.run_command('avb lock')
+        response = ubman.run_command('avb read_rb 5')
+        assert response == 'Rollback index: 7'
+
+        # Unlocking it resets them
+        response = ubman.run_command('avb unlock')
+        assert response == 'Device unlocked, rollback indexes reset'
+
+        response = ubman.run_command('avb is_unlocked')
+        assert response == 'Unlocked = 1'
+
+        response = ubman.run_command('avb read_rb 5')
+        assert response == 'Rollback index: 0'
+    finally:
+        # The other tests expect the unlocked state the TA starts in
+        ubman.run_command('avb unlock')
+
+
+@pytest.mark.buildconfigspec('cmd_avb')
 @pytest.mark.buildconfigspec('cmd_mmc')
 def test_avb_init_interface(ubman):
     """Check that 'avb init' accepts an explicit interface
