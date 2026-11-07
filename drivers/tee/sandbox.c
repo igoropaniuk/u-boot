@@ -4,6 +4,8 @@
  */
 
 #include <dm.h>
+#include <hexdump.h>
+#include <malloc.h>
 #include <sandboxtee.h>
 #include <tee.h>
 #include <tee/optee_ta_avb.h>
@@ -268,7 +270,8 @@ static u32 ta_avb_invoke_func(struct udevice *dev, u32 func, uint num_params,
 		if (!ep)
 			return TEE_ERROR_ITEM_NOT_FOUND;
 
-		tmp_sz = strlen(ep->data) + 1;
+		/* values are stored hex-encoded, see the write below */
+		tmp_sz = strlen(ep->data) / 2;
 		if (value_sz < tmp_sz) {
 			/*
 			 * For TA_AVB_CMD_READ_PERSIST_VALUE2, reject
@@ -287,7 +290,7 @@ static u32 ta_avb_invoke_func(struct udevice *dev, u32 func, uint num_params,
 			tmp_sz = value_sz;
 		}
 
-		memcpy(value, ep->data, tmp_sz);
+		hex2bin(value, ep->data, tmp_sz);
 		params[1].u.memref.size = tmp_sz;
 
 		return TEE_SUCCESS;
@@ -311,9 +314,17 @@ static u32 ta_avb_invoke_func(struct udevice *dev, u32 func, uint num_params,
 		if (ep)
 			hdelete_r(e.key, &state->pstorage_htab, 0);
 
+		/*
+		 * The table holds strings: store the value hex-encoded so
+		 * that it can contain zero bytes, as with the real TA
+		 */
 		e.key = name;
-		e.data = value;
+		e.data = malloc(value_sz * 2 + 1);
+		if (!e.data)
+			return TEE_ERROR_OUT_OF_MEMORY;
+		*bin2hex(e.data, value, value_sz) = '\0';
 		hsearch_r(e, ENV_ENTER, &ep, &state->pstorage_htab, 0);
+		free(e.data);
 		if (!ep)
 			return TEE_ERROR_OUT_OF_MEMORY;
 
