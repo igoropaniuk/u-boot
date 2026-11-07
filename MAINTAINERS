@@ -858,9 +858,11 @@ M:	Mattijs Korpershoek <mkorpershoek@kernel.org>
 R:	Guillaume La Roque <glaroque@baylibre.com>
 S:	Maintained
 T:	git https://git.u-boot-project.org/u-boot/custodians/u-boot-dfu.git
+F:	boot/android_misc.c
 F:	boot/bootmeth_android.c
 F:	boot/bootmeth_android.h
 F:	doc/develop/bootstd/android.rst
+F:	include/android_misc.h
 
 BTRFS
 M:	Marek Behún <kabel@kernel.org>

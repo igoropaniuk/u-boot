@@ -73,7 +73,7 @@ obj-$(CONFIG_$(PHASE_)BOOTMETH_VBE_SIMPLE) += vbe_simple.o vbe_common.o
 obj-$(CONFIG_$(PHASE_)BOOTMETH_VBE_SIMPLE_FW) += vbe_simple_fw.o
 obj-$(CONFIG_$(PHASE_)BOOTMETH_VBE_SIMPLE_OS) += vbe_simple_os.o
 
-obj-$(CONFIG_$(PHASE_)BOOTMETH_ANDROID) += bootmeth_android.o
+obj-$(CONFIG_$(PHASE_)BOOTMETH_ANDROID) += bootmeth_android.o android_misc.o
 
 obj-$(CONFIG_$(PHASE_)IMAGEMAP) += imagemap.o
 
