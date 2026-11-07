@@ -171,6 +171,42 @@ def test_avb_persistent_values(ubman, avb_device_id):
 
 
 @pytest.mark.buildconfigspec('cmd_avb')
+@pytest.mark.buildconfigspec('optee_ta_avb')
+def test_avb_persistent_values_hex(ubman, avb_device_id):
+    """Test reading/writing binary persistent values as hex
+
+    Values such as the digest of a user-provisioned root key are binary and
+    may contain zero bytes, which the string commands cannot handle.
+    """
+
+    response = ubman.run_command('avb init %x' % avb_device_id)
+    assert response == ''
+
+    response = ubman.run_command('avb write_pvalue_hex test_hex 00ff0010')
+    assert response == 'Wrote 4 bytes'
+
+    response = ubman.run_command('avb read_pvalue_hex test_hex 4')
+    assert response == 'Read 4 bytes, value = 00ff0010'
+
+    # A string value reads back with its terminating zero byte
+    response = ubman.run_command('avb write_pvalue test_str ab')
+    assert response == 'Wrote 3 bytes'
+
+    response = ubman.run_command('avb read_pvalue_hex test_str 3')
+    assert response == 'Read 3 bytes, value = 616200'
+
+    # Malformed values are rejected and leave the stored value alone
+    response = ubman.run_command('avb write_pvalue_hex test_hex 0')
+    assert 'Value must be an even number of hex digits' in response
+
+    response = ubman.run_command('avb write_pvalue_hex test_hex zz')
+    assert 'Value is not a valid hex string' in response
+
+    response = ubman.run_command('avb read_pvalue_hex test_hex 4')
+    assert response == 'Read 4 bytes, value = 00ff0010'
+
+
+@pytest.mark.buildconfigspec('cmd_avb')
 @pytest.mark.buildconfigspec('cmd_mmc')
 def test_avb_init_interface(ubman):
     """Check that 'avb init' accepts an explicit interface
