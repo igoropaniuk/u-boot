@@ -121,6 +121,7 @@ F:	common/avb_verify.c
 F:	doc/android/avb2.rst
 F:	include/avb_verify.h
 F:	lib/libavb/
+F:	test/boot/avb.c
 F:	test/py/tests/test_android/test_avb.py
 
 ARC
