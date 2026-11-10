@@ -59,6 +59,21 @@
 
 #define CORE_CLK_PWRSAVE	BIT(1)
 
+/* Timing mode selection */
+#define CORE_HC_MCLK_SEL_DFLT	(2 << 8)
+#define CORE_HC_MCLK_SEL_HS400	(3 << 8)
+#define CORE_HC_MCLK_SEL_MASK	(3 << 8)
+#define CORE_HC_SELECT_IN_EN	BIT(18)
+#define CORE_HC_SELECT_IN_HS400	(6 << 19)
+#define CORE_HC_SELECT_IN_MASK	(7 << 19)
+
+/* HS400 DDR/SDC4 DLL calibration, needed alongside the SDR CM_DLL above */
+#define CORE_DDR_CAL_EN		BIT(0)
+#define CORE_DDR_DLL_LOCK	BIT(11)
+#define CORE_PWRSAVE_DLL	BIT(3)
+#define CORE_CMDIN_RCLK_EN	BIT(1)
+#define DDR_CONFIG_POR_VAL	0x80040873
+
 #define CORE_FREQ_100MHZ	(100 * 1000000)
 #define MAX_PHASES		16
 
@@ -84,6 +99,11 @@ struct msm_sdhc {
 	u32 dll_config;		/* qcom,dll-config DT override, 0 if absent */
 	bool use_14lpp_dll_reset;	/* core_minor >= 0x42 */
 	bool uses_tassadar_dll;		/* core_minor >= 0x71 */
+
+	/* HS400 support */
+	bool use_cdclp533;		/* core_minor < 0x34, legacy calibration path */
+	bool updated_ddr_cfg;		/* core_minor >= 0x49 */
+	u32 ddr_config;			/* qcom,ddr-config DT override, else POR value */
 };
 
 struct msm_sdhc_variant_info {
@@ -96,6 +116,12 @@ struct msm_sdhc_variant_info {
 	u32 core_dll_usr_ctl; /* Present on SDCC5.1 onwards */
 	u32 core_vendor_spec;
 	u32 core_vendor_spec_capabilities0;
+
+	/* HS400 DDR/SDC4 calibration registers */
+	u32 core_ddr_200_cfg;
+	u32 core_vendor_spec3;
+	u32 core_ddr_config_old; /* Applicable to sdcc minor ver < 0x49; 0 if N/A */
+	u32 core_ddr_config;
 };
 
 #endif /* __MSM_SDHCI_H__ */

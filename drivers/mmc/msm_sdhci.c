@@ -340,6 +340,107 @@ static int msm_init_cm_dll(struct sdhci_host *host)
 	return 0;
 }
 
+/*
+ * HS400 DDR calibration via SDC4 CM_DLL, used when use_cdclp533 is false
+ * (core_minor >= 0x34).
+ */
+static int sdhci_msm_cm_dll_sdc4_calibration(struct sdhci_host *host)
+{
+	struct udevice *dev = host->mmc->dev;
+	struct msm_sdhc *priv = dev_get_priv(dev);
+	const struct msm_sdhc_variant_info *var_info =
+		(void *)dev_get_driver_data(dev);
+	u32 config, ddr_cfg_offset, wait_cnt;
+	int ret;
+
+	/*
+	 * core_ddr_config defaults to the desired configuration on reset;
+	 * reprogram the POR value in case an earlier bootloader stage
+	 * modified it.
+	 */
+	if (priv->updated_ddr_cfg)
+		ddr_cfg_offset = var_info->core_ddr_config;
+	else
+		ddr_cfg_offset = var_info->core_ddr_config_old;
+	writel(priv->ddr_config, host->ioaddr + ddr_cfg_offset);
+
+	config = readl(host->ioaddr + var_info->core_ddr_200_cfg);
+	config &= ~CORE_CMDIN_RCLK_EN;
+	writel(config, host->ioaddr + var_info->core_ddr_200_cfg);
+
+	config = readl(host->ioaddr + var_info->core_dll_config_2);
+	config |= CORE_DDR_CAL_EN;
+	writel(config, host->ioaddr + var_info->core_dll_config_2);
+
+	ret = -ETIMEDOUT;
+	wait_cnt = 100;
+	while (wait_cnt--) {
+		if (readl(host->ioaddr + var_info->core_dll_status) &
+		    CORE_DDR_DLL_LOCK) {
+			ret = 0;
+			break;
+		}
+		udelay(10);
+	}
+
+	if (ret) {
+		printf("%s: CM_DLL_SDC4 calibration was not completed\n",
+		       host->name);
+		return ret;
+	}
+
+	/*
+	 * Skip CORE_PWRSAVE_DLL for the 14lpp DLL reset variant: it cannot
+	 * guarantee the MCLK-gating timing PWRSAVE_DLL depends on.
+	 */
+	if (!priv->use_14lpp_dll_reset) {
+		config = readl(host->ioaddr + var_info->core_vendor_spec3);
+		config |= CORE_PWRSAVE_DLL;
+		writel(config, host->ioaddr + var_info->core_vendor_spec3);
+	}
+
+	return 0;
+}
+
+/*
+ * HS400 DLL calibration, performed once when transitioning into HS400 at
+ * clock > 100MHz.
+ */
+static int sdhci_msm_hs400_dll_calibration(struct sdhci_host *host)
+{
+	struct udevice *dev = host->mmc->dev;
+	struct msm_sdhc *priv = dev_get_priv(dev);
+	const struct msm_sdhc_variant_info *var_info =
+		(void *)dev_get_driver_data(dev);
+	u32 config;
+	int ret;
+
+	ret = msm_init_cm_dll(host);
+	if (ret)
+		return ret;
+
+	/* Restore the phase found during HS200 tuning */
+	ret = msm_config_cm_dll_phase(host, priv->saved_tuning_phase);
+	if (ret)
+		return ret;
+
+	config = readl(host->ioaddr + var_info->core_dll_config);
+	config |= CORE_CMD_DAT_TRACK_SEL;
+	writel(config, host->ioaddr + var_info->core_dll_config);
+
+	/*
+	 * use_cdclp533 only applies to legacy SDCC (core_minor < 0x34); our
+	 * supported targets always use the SDC4 calibration path.
+	 */
+	if (priv->use_cdclp533) {
+		printf("%s: CDCLP533 HS400 calibration path is not implemented\n",
+		       host->name);
+		return -EOPNOTSUPP;
+	}
+
+	return sdhci_msm_cm_dll_sdc4_calibration(host);
+}
+
 static int msm_find_most_appropriate_phase(struct sdhci_host *host,
 					   u8 *phase_table,
 					   u8 total_phases)
@@ -496,9 +597,130 @@ retry:
 }
 #endif
 
+/*
+ * Configure HC mode selection. On the first HS400 transition,
+ * calibration_done is still false, so the HS400 mux-select bits are
+ * deferred until calibration completes in msm_sdhci_config_dll(); see
+ * sdhci_msm_hs400_select_in().
+ */
+static void sdhci_msm_hc_select_mode(struct sdhci_host *host)
+{
+	struct mmc *mmc = host->mmc;
+	struct udevice *dev = mmc->dev;
+	struct msm_sdhc *priv = dev_get_priv(dev);
+	const struct msm_sdhc_variant_info *var_info =
+		(void *)dev_get_driver_data(dev);
+	bool is_hs400 = mmc->selected_mode == MMC_HS_400;
+	u32 config;
+
+	config = readl(host->ioaddr + var_info->core_vendor_spec);
+	config &= ~CORE_HC_MCLK_SEL_MASK;
+
+	if (mmc->selected_mode == MMC_HS_200)
+		config |= CORE_HC_MCLK_SEL_DFLT;
+	else if (is_hs400)
+		config |= CORE_HC_MCLK_SEL_HS400;
+	else
+		config |= CORE_HC_MCLK_SEL_DFLT;
+
+	writel(config, host->ioaddr + var_info->core_vendor_spec);
+
+	if (is_hs400) {
+		if (priv->calibration_done) {
+			config = readl(host->ioaddr + var_info->core_vendor_spec);
+			config |= CORE_HC_SELECT_IN_HS400;
+			config |= CORE_HC_SELECT_IN_EN;
+			writel(config, host->ioaddr + var_info->core_vendor_spec);
+		}
+	} else {
+		/*
+		 * Clear these bits for every non-HS400 mode so a previous
+		 * HS400 attempt never leaves them stuck set.
+		 */
+		if (!priv->use_cdclp533) {
+			config = readl(host->ioaddr + var_info->core_vendor_spec3);
+			config &= ~CORE_PWRSAVE_DLL;
+			writel(config, host->ioaddr + var_info->core_vendor_spec3);
+		}
+
+		config = readl(host->ioaddr + var_info->core_vendor_spec);
+		config &= ~CORE_HC_SELECT_IN_EN;
+		config &= ~CORE_HC_SELECT_IN_MASK;
+		writel(config, host->ioaddr + var_info->core_vendor_spec);
+	}
+}
+
+/*
+ * Selects HS400 in the HC_SELECT_IN mux. Must only be called after
+ * sdhci_msm_hs400_dll_calibration() succeeds.
+ */
+static void sdhci_msm_hs400_select_in(struct sdhci_host *host)
+{
+	struct udevice *dev = host->mmc->dev;
+	const struct msm_sdhc_variant_info *var_info =
+		(void *)dev_get_driver_data(dev);
+	u32 config;
+
+	config = readl(host->ioaddr + var_info->core_vendor_spec);
+	config |= CORE_HC_SELECT_IN_HS400;
+	config |= CORE_HC_SELECT_IN_EN;
+	writel(config, host->ioaddr + var_info->core_vendor_spec);
+}
+
+static void sdhci_msm_set_control_reg(struct sdhci_host *host)
+{
+	struct mmc *mmc = host->mmc;
+	struct udevice *dev = mmc->dev;
+	struct msm_sdhc *priv = dev_get_priv(dev);
+	const struct msm_sdhc_variant_info *var_info =
+		(void *)dev_get_driver_data(dev);
+	u32 config;
+
+	/*
+	 * This controller has no HOST_CONTROL2 encoding for HS400. Keep the
+	 * UHS field at SDR104 (same as HS200) for HS400 too; the data path
+	 * is switched to HS400 timing via the vendor-specific
+	 * CORE_HC_MCLK_SEL/CORE_HC_SELECT_IN bits instead.
+	 */
+	sdhci_set_voltage(host);
+	if (mmc->selected_mode == MMC_HS_400) {
+		u32 ctrl2 = sdhci_readw(host, SDHCI_HOST_CONTROL2);
+
+		ctrl2 &= ~SDHCI_CTRL_UHS_MASK;
+		ctrl2 |= SDHCI_CTRL_UHS_SDR104;
+		sdhci_writew(host, ctrl2, SDHCI_HOST_CONTROL2);
+	} else {
+		sdhci_set_uhs_timing(host);
+	}
+
+	sdhci_msm_hc_select_mode(host);
+
+	/*
+	 * Below 100MHz the feedback clock must be provided without the DLL,
+	 * so tuning can be skipped.
+	 */
+	if (mmc->clock && mmc->clock <= CORE_FREQ_100MHZ) {
+		if (mmc->selected_mode == MMC_HS_200 ||
+		    mmc->selected_mode == MMC_HS_400) {
+			config = readl(host->ioaddr + var_info->core_dll_config);
+			config |= CORE_DLL_RST;
+			writel(config, host->ioaddr + var_info->core_dll_config);
+
+			config = readl(host->ioaddr + var_info->core_dll_config);
+			config |= CORE_DLL_PDN;
+			writel(config, host->ioaddr + var_info->core_dll_config);
+
+			/* Calibration must be redone once the clock returns to HS400 speed. */
+			priv->calibration_done = false;
+		}
+	}
+}
+
 static int msm_sdhci_config_dll(struct sdhci_host *host, u32 clock, bool enable)
 {
 	struct udevice *dev = mmc_to_dev(host->mmc);
+	struct mmc *mmc = host->mmc;
+	struct msm_sdhc *priv = dev_get_priv(dev);
 	const struct msm_sdhc_variant_info *var_info = (void *)dev_get_driver_data(dev);
 	u32 config;
 
@@ -519,12 +741,32 @@ static int msm_sdhci_config_dll(struct sdhci_host *host, u32 clock, bool enable)
 		writel(config, host->ioaddr + var_info->core_dll_config);
 	}
 
+	/*
+	 * HS400 requires a dedicated DDR/SDC4 DLL calibration step, performed
+	 * once per calibration cycle once the clock is running above 100MHz.
+	 */
+	if (enable && clock > MHZ(100) &&
+	    mmc->selected_mode == MMC_HS_400 && priv->tuning_done &&
+	    !priv->calibration_done) {
+		int ret = sdhci_msm_hs400_dll_calibration(host);
+
+		if (!ret) {
+			priv->calibration_done = true;
+			/* Safe to switch the data-path mux into HS400 timing now. */
+			sdhci_msm_hs400_select_in(host);
+		} else {
+			printf("%s: Failed to calibrate DLL for HS400 mode (%d)\n",
+			       host->name, ret);
+			return ret;
+		}
+	}
+
 	return 0;
 }
 
 struct sdhci_ops msm_sdhci_ops = {
 	.config_dll = &msm_sdhci_config_dll,
-	.set_control_reg = &sdhci_set_control_reg,
+	.set_control_reg = &sdhci_msm_set_control_reg,
 #if CONFIG_IS_ENABLED(MMC_SUPPORTS_TUNING)
 	.platform_execute_tuning = &sdhci_msm_execute_tuning,
 #endif
@@ -596,7 +838,16 @@ static int msm_sdc_probe(struct udevice *dev)
 	if (core_major == 1 && core_minor >= 0x71)
 		prv->uses_tassadar_dll = true;
 
+	if (core_major == 1 && core_minor < 0x34)
+		prv->use_cdclp533 = true;
+
+	if (core_major == 1 && core_minor >= 0x49)
+		prv->updated_ddr_cfg = true;
+
 	dev_read_u32(dev, "qcom,dll-config", &prv->dll_config);
+
+	if (dev_read_u32(dev, "qcom,ddr-config", &prv->ddr_config))
+		prv->ddr_config = DDR_CONFIG_POR_VAL;
 
 	/*
 	 * Support for some capabilities is not advertised by newer
@@ -692,6 +943,11 @@ static const struct msm_sdhc_variant_info msm_sdhc_mci_var = {
 	.core_dll_config_2 = 0x1b4,
 	.core_vendor_spec = 0x10c,
 	.core_vendor_spec_capabilities0 = 0x11c,
+
+	.core_ddr_200_cfg = 0x184,
+	.core_vendor_spec3 = 0x1b0,
+	.core_ddr_config_old = 0x1b8,
+	.core_ddr_config = 0x1bc,
 };
 
 static const struct msm_sdhc_variant_info msm_sdhc_v5_var = {
@@ -704,6 +960,14 @@ static const struct msm_sdhc_variant_info msm_sdhc_v5_var = {
 	.core_dll_usr_ctl = 0x388,
 	.core_vendor_spec = 0x20c,
 	.core_vendor_spec_capabilities0 = 0x21c,
+
+	.core_ddr_200_cfg = 0x224,
+	.core_vendor_spec3 = 0x250,
+	.core_ddr_config = 0x25c,
+	/*
+	 * core_ddr_config_old not present on V5 - updated_ddr_cfg is
+	 * effectively always true here since V5 implies core_minor >= 0x49
+	 */
 };
 
 static const struct udevice_id msm_mmc_ids[] = {
