@@ -31,6 +31,37 @@
 #define CORE_DLL_PDN		BIT(29)
 #define CORE_DLL_RST		BIT(30)
 
+/* DLL configuration */
+#define CORE_DLL_EN		BIT(16)
+#define CORE_CDR_EN		BIT(17)
+#define CORE_CK_OUT_EN		BIT(18)
+#define CORE_CDR_EXT_EN		BIT(19)
+#define CORE_DLL_LOCK		BIT(7)
+#define CORE_CMD_DAT_TRACK_SEL	BIT(0)
+
+#define CDR_SELEXT_SHIFT	20
+#define CDR_SELEXT_MASK		(0xf << CDR_SELEXT_SHIFT)
+
+/* MCLK frequency selection (CMUX_SHIFT_PHASE) - required for the DLL to lock */
+#define CMUX_SHIFT_PHASE_SHIFT	24
+#define CMUX_SHIFT_PHASE_MASK	(7 << CMUX_SHIFT_PHASE_SHIFT)
+
+/* 14LPP DLL reset / Tassadar DLL extras, for SDCC minor >= 0x42 / 0x71 */
+#define CORE_DLL_CLOCK_DISABLE	BIT(21)
+
+#define DLL_USR_CTL_POR_VAL	0x10800
+#define ENABLE_DLL_LOCK_STATUS	BIT(26)
+#define FINE_TUNE_MODE_EN	BIT(27)
+#define BIAS_OK_SIGNAL		BIT(29)
+
+#define DLL_CONFIG_3_LOW_FREQ_VAL	0x08
+#define DLL_CONFIG_3_HIGH_FREQ_VAL	0x10
+
+#define CORE_CLK_PWRSAVE	BIT(1)
+
+#define CORE_FREQ_100MHZ	(100 * 1000000)
+#define MAX_PHASES		16
+
 #define MHZ(X) ((X) * 1000000UL)
 
 struct msm_sdhc_plat {
@@ -43,12 +74,26 @@ struct msm_sdhc {
 	void *base;
 	struct clk_bulk clks;
 	struct udevice *vqmmc;
+
+	/* HS200 tuning state */
+	bool tuning_done;
+	bool calibration_done;
+	u8 saved_tuning_phase;
+
+	/* DLL init sequence variant selection, from the SDCC core version */
+	u32 dll_config;		/* qcom,dll-config DT override, 0 if absent */
+	bool use_14lpp_dll_reset;	/* core_minor >= 0x42 */
+	bool uses_tassadar_dll;		/* core_minor >= 0x71 */
 };
 
 struct msm_sdhc_variant_info {
 	bool mci_removed;
 
 	u32 core_dll_config;
+	u32 core_dll_status;
+	u32 core_dll_config_2;
+	u32 core_dll_config_3;
+	u32 core_dll_usr_ctl; /* Present on SDCC5.1 onwards */
 	u32 core_vendor_spec;
 	u32 core_vendor_spec_capabilities0;
 };

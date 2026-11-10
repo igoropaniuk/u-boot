@@ -14,6 +14,7 @@
 #include <wait_bit.h>
 #include <asm/io.h>
 #include <linux/bitops.h>
+#include <linux/iopoll.h>
 #include <power/regulator.h>
 #include "msm_sdhci.h"
 
@@ -106,11 +107,403 @@ static int msm_sdc_mci_init(struct msm_sdhc *prv)
 	return 0;
 }
 
+static int msm_dll_poll_ck_out_en(struct sdhci_host *host, u8 poll)
+{
+	u32 ck_out_en;
+	struct udevice *dev = host->mmc->dev;
+	const struct msm_sdhc_variant_info *var_info =
+		(void *)dev_get_driver_data(dev);
+	int ret;
+
+	ret = read_poll_timeout(readl, ck_out_en,
+				(!!(ck_out_en & CORE_CK_OUT_EN) == poll),
+				1, 50,
+				host->ioaddr + var_info->core_dll_config);
+	if (ret) {
+		printf("%s: CK_OUT_EN bit is not %d\n",
+		       host->name, poll);
+		return -ETIMEDOUT;
+	}
+
+	return 0;
+}
+
+static int msm_config_cm_dll_phase(struct sdhci_host *host, u8 phase)
+{
+	int rc;
+	static const u8 grey_coded_phase_table[] = {
+		0x0, 0x1, 0x3, 0x2, 0x6, 0x7, 0x5, 0x4,
+		0xc, 0xd, 0xf, 0xe, 0xa, 0xb, 0x9, 0x8
+	};
+	u32 config;
+	struct udevice *dev = host->mmc->dev;
+	const struct msm_sdhc_variant_info *var_info =
+		(void *)dev_get_driver_data(dev);
+
+	if (phase > 0xf)
+		return -EINVAL;
+
+	config = readl(host->ioaddr + var_info->core_dll_config);
+	config &= ~(CORE_CDR_EN | CORE_CK_OUT_EN);
+	config |= (CORE_CDR_EXT_EN | CORE_DLL_EN);
+	writel(config, host->ioaddr + var_info->core_dll_config);
+
+	rc = msm_dll_poll_ck_out_en(host, 0);
+	if (rc)
+		return rc;
+
+	config = readl(host->ioaddr + var_info->core_dll_config);
+	config &= ~CDR_SELEXT_MASK;
+	config |= grey_coded_phase_table[phase] << CDR_SELEXT_SHIFT;
+	writel(config, host->ioaddr + var_info->core_dll_config);
+
+	config = readl(host->ioaddr + var_info->core_dll_config);
+	config |= CORE_CK_OUT_EN;
+	writel(config, host->ioaddr + var_info->core_dll_config);
+
+	rc = msm_dll_poll_ck_out_en(host, 1);
+	if (rc)
+		return rc;
+
+	config = readl(host->ioaddr + var_info->core_dll_config);
+	config |= CORE_CDR_EN;
+	config &= ~CORE_CDR_EXT_EN;
+	writel(config, host->ioaddr + var_info->core_dll_config);
+
+	return 0;
+}
+
+/*
+ * Programs the MCLK_FREQ (CMUX_SHIFT_PHASE) field. Must be set before
+ * enabling CORE_DLL_EN/CORE_CK_OUT_EN, otherwise the DLL will not lock.
+ *
+ * host->clock is not updated by the generic sdhci.c, so mmc->clock is
+ * used instead.
+ */
+static void msm_cm_dll_set_freq(struct sdhci_host *host)
+{
+	struct udevice *dev = host->mmc->dev;
+	struct mmc *mmc = host->mmc;
+	const struct msm_sdhc_variant_info *var_info =
+		(void *)dev_get_driver_data(dev);
+	u32 mclk_freq = 0, config;
+	unsigned int clock = mmc->clock;
+
+	if (clock <= 112000000)
+		mclk_freq = 0;
+	else if (clock <= 125000000)
+		mclk_freq = 1;
+	else if (clock <= 137000000)
+		mclk_freq = 2;
+	else if (clock <= 150000000)
+		mclk_freq = 3;
+	else if (clock <= 162000000)
+		mclk_freq = 4;
+	else if (clock <= 175000000)
+		mclk_freq = 5;
+	else if (clock <= 187000000)
+		mclk_freq = 6;
+	else if (clock <= 200000000)
+		mclk_freq = 7;
+
+	config = readl(host->ioaddr + var_info->core_dll_config);
+	config &= ~CMUX_SHIFT_PHASE_MASK;
+	config |= mclk_freq << CMUX_SHIFT_PHASE_SHIFT;
+	writel(config, host->ioaddr + var_info->core_dll_config);
+}
+
+static int msm_dll_poll_lock_status(struct sdhci_host *host)
+{
+	u32 dll_status;
+	struct udevice *dev = host->mmc->dev;
+	const struct msm_sdhc_variant_info *var_info =
+		(void *)dev_get_driver_data(dev);
+	int ret;
+
+	ret = read_poll_timeout(readl, dll_status,
+				(dll_status & CORE_DLL_LOCK),
+				1, 50,
+				host->ioaddr + var_info->core_dll_status);
+	if (ret) {
+		printf("%s: DLL failed to LOCK (DLL_STATUS=0x%08x)\n",
+		       host->name,
+		       readl(host->ioaddr + var_info->core_dll_status));
+		return -ETIMEDOUT;
+	}
+
+	return 0;
+}
+
+/* CM_DLL initialization sequence */
+static int msm_init_cm_dll(struct sdhci_host *host)
+{
+	struct udevice *dev = host->mmc->dev;
+	struct msm_sdhc *priv = dev_get_priv(dev);
+	const struct msm_sdhc_variant_info *var_info =
+		(void *)dev_get_driver_data(dev);
+	u32 config;
+	int ret;
+
+	/*
+	 * Keep the clock enabled while DLL tuning is in progress; PWRSAVE
+	 * may otherwise turn it off.
+	 */
+	config = readl(host->ioaddr + var_info->core_vendor_spec);
+	config &= ~CORE_CLK_PWRSAVE;
+	writel(config, host->ioaddr + var_info->core_vendor_spec);
+
+	if (priv->dll_config)
+		writel(priv->dll_config, host->ioaddr + var_info->core_dll_config);
+
+	if (priv->use_14lpp_dll_reset) {
+		config = readl(host->ioaddr + var_info->core_dll_config);
+		config &= ~CORE_CK_OUT_EN;
+		writel(config, host->ioaddr + var_info->core_dll_config);
+
+		if (var_info->core_dll_config_2) {
+			config = readl(host->ioaddr + var_info->core_dll_config_2);
+			config |= CORE_DLL_CLOCK_DISABLE;
+			writel(config, host->ioaddr + var_info->core_dll_config_2);
+		}
+	}
+
+	config = readl(host->ioaddr + var_info->core_dll_config);
+	config |= CORE_DLL_RST;
+	writel(config, host->ioaddr + var_info->core_dll_config);
+
+	config = readl(host->ioaddr + var_info->core_dll_config);
+	config |= CORE_DLL_PDN;
+	writel(config, host->ioaddr + var_info->core_dll_config);
+
+	/*
+	 * MCLK_FREQ must be programmed while the DLL is reset and powered
+	 * down, unless a DT dll-config override is in effect.
+	 */
+	if (!priv->dll_config)
+		msm_cm_dll_set_freq(host);
+
+	config = readl(host->ioaddr + var_info->core_dll_config);
+	config &= ~CORE_DLL_RST;
+	writel(config, host->ioaddr + var_info->core_dll_config);
+
+	config = readl(host->ioaddr + var_info->core_dll_config);
+	config &= ~CORE_DLL_PDN;
+	writel(config, host->ioaddr + var_info->core_dll_config);
+
+	if (priv->use_14lpp_dll_reset) {
+		if (!priv->dll_config)
+			msm_cm_dll_set_freq(host);
+
+		if (var_info->core_dll_config_2) {
+			config = readl(host->ioaddr + var_info->core_dll_config_2);
+			config &= ~CORE_DLL_CLOCK_DISABLE;
+			writel(config, host->ioaddr + var_info->core_dll_config_2);
+		}
+	}
+
+	/* Applicable to SDCC v5.1 onwards only */
+	if (priv->uses_tassadar_dll && var_info->core_dll_usr_ctl) {
+		config = DLL_USR_CTL_POR_VAL | FINE_TUNE_MODE_EN |
+			 ENABLE_DLL_LOCK_STATUS | BIAS_OK_SIGNAL;
+		writel(config, host->ioaddr + var_info->core_dll_usr_ctl);
+
+		if (var_info->core_dll_config_3) {
+			config = readl(host->ioaddr + var_info->core_dll_config_3);
+			config &= ~0xFF;
+			if (host->mmc->clock < 150000000)
+				config |= DLL_CONFIG_3_LOW_FREQ_VAL;
+			else
+				config |= DLL_CONFIG_3_HIGH_FREQ_VAL;
+			writel(config, host->ioaddr + var_info->core_dll_config_3);
+		}
+	}
+
+	config = readl(host->ioaddr + var_info->core_dll_config);
+	config |= CORE_DLL_EN;
+	writel(config, host->ioaddr + var_info->core_dll_config);
+
+	config = readl(host->ioaddr + var_info->core_dll_config);
+	config |= CORE_CK_OUT_EN;
+	writel(config, host->ioaddr + var_info->core_dll_config);
+
+	ret = msm_dll_poll_lock_status(host);
+	if (ret)
+		return ret;
+
+	config = readl(host->ioaddr + var_info->core_dll_config);
+	config |= CORE_CDR_EN;
+	config &= ~CORE_CDR_EXT_EN;
+	writel(config, host->ioaddr + var_info->core_dll_config);
+
+	priv->calibration_done = false;
+
+	return 0;
+}
+
+static int msm_find_most_appropriate_phase(struct sdhci_host *host,
+					   u8 *phase_table,
+					   u8 total_phases)
+{
+	int ret;
+	u8 ranges[MAX_PHASES][MAX_PHASES] = { {0}, {0} };
+	u8 phases_per_row[MAX_PHASES] = { 0 };
+	int row_index = 0, col_index = 0, selected_row_index = 0;
+	int i, longest_range_len = 0;
+	bool found = false;
+
+	if (!total_phases || total_phases > MAX_PHASES) {
+		printf("%s: Invalid argument: total_phases=%d\n",
+		       host->name, total_phases);
+		return -EINVAL;
+	}
+
+	for (i = 0; i < total_phases; i++) {
+		ranges[row_index][col_index] = phase_table[i];
+		phases_per_row[row_index] += 1;
+		col_index++;
+
+		if ((i + 1) == total_phases)
+			continue;
+
+		if (phase_table[i] + 1 != phase_table[i + 1]) {
+			row_index++;
+			col_index = 0;
+		}
+	}
+
+	if (row_index == 0) {
+		ret = phase_table[total_phases / 2];
+		goto exit;
+	}
+
+	for (i = 0; i <= row_index; i++) {
+		if (phases_per_row[i] > longest_range_len) {
+			longest_range_len = phases_per_row[i];
+			selected_row_index = i;
+			found = true;
+		}
+	}
+
+	if (found) {
+		ret = ranges[selected_row_index][longest_range_len / 2];
+	} else {
+		ret = -EIO;
+		printf("%s: Failed to find a valid phase\n", host->name);
+	}
+
+exit:
+	return ret;
+}
+
+static bool sdhci_msm_is_tuning_needed(struct sdhci_host *host)
+{
+	struct mmc *mmc = host->mmc;
+
+	return mmc->selected_mode == MMC_HS_200;
+}
+
+#if CONFIG_IS_ENABLED(MMC_SUPPORTS_TUNING)
+static int sdhci_msm_execute_tuning(struct mmc *mmc, u8 opcode)
+{
+	struct sdhci_host *host = mmc->priv;
+	int tuning_seq_cnt = 10;
+	u8 phase, tuned_phases[MAX_PHASES], tuned_phase_cnt = 0;
+	int rc;
+	struct udevice *dev = mmc->dev;
+	struct msm_sdhc *priv = dev_get_priv(dev);
+
+	if (!sdhci_msm_is_tuning_needed(host))
+		return 0;
+
+	/*
+	 * The SDHCI core may call execute_tuning before host->clock is
+	 * updated to match mmc->clock.
+	 */
+	if (host->clock != mmc->clock) {
+		rc = sdhci_set_clock(mmc, mmc->clock);
+		if (rc) {
+			printf("%s: Failed to set clock for tuning\n", host->name);
+			return rc;
+		}
+	}
+
+	priv->tuning_done = false;
+
+retry:
+	rc = msm_init_cm_dll(host);
+	if (rc) {
+		printf("%s: Failed to init DLL\n", host->name);
+		return rc;
+	}
+
+	phase = 0;
+	tuned_phase_cnt = 0;
+
+	do {
+		rc = msm_config_cm_dll_phase(host, phase);
+		if (rc) {
+			printf("%s: Failed to set DLL phase %d\n",
+			       host->name, phase);
+			return rc;
+		}
+
+		rc = mmc_send_tuning(mmc, opcode);
+		if (!rc)
+			tuned_phases[tuned_phase_cnt++] = phase;
+	} while (++phase < MAX_PHASES);
+
+	if (tuned_phase_cnt) {
+		if (tuned_phase_cnt == MAX_PHASES) {
+			/*
+			 * All phases valid is close to as bad as none valid:
+			 * likely no phase is really reliable. Retry a few
+			 * times rather than guessing.
+			 */
+			if (--tuning_seq_cnt) {
+				tuned_phase_cnt = 0;
+				goto retry;
+			}
+		}
+
+		rc = msm_find_most_appropriate_phase(host, tuned_phases,
+						     tuned_phase_cnt);
+		if (rc < 0) {
+			printf("%s: Failed to find appropriate phase\n",
+			       host->name);
+			return rc;
+		}
+		phase = rc;
+
+		rc = msm_config_cm_dll_phase(host, phase);
+		if (rc) {
+			printf("%s: Failed to set final phase %d\n",
+			       host->name, phase);
+			return rc;
+		}
+
+		priv->saved_tuning_phase = phase;
+	} else {
+		if (--tuning_seq_cnt)
+			goto retry;
+		printf("%s: No tuning point found\n", host->name);
+		rc = -EIO;
+	}
+
+	if (!rc)
+		priv->tuning_done = true;
+
+	return rc;
+}
+#endif
+
 static int msm_sdhci_config_dll(struct sdhci_host *host, u32 clock, bool enable)
 {
 	struct udevice *dev = mmc_to_dev(host->mmc);
 	const struct msm_sdhc_variant_info *var_info = (void *)dev_get_driver_data(dev);
 	u32 config;
+
+	if (clock == 0)
+		return 0;
 
 	if (enable && clock < MHZ(100)) {
 		/*
@@ -132,6 +525,9 @@ static int msm_sdhci_config_dll(struct sdhci_host *host, u32 clock, bool enable)
 struct sdhci_ops msm_sdhci_ops = {
 	.config_dll = &msm_sdhci_config_dll,
 	.set_control_reg = &sdhci_set_control_reg,
+#if CONFIG_IS_ENABLED(MMC_SUPPORTS_TUNING)
+	.platform_execute_tuning = &sdhci_msm_execute_tuning,
+#endif
 };
 
 static int msm_sdc_probe(struct udevice *dev)
@@ -192,6 +588,15 @@ static int msm_sdc_probe(struct udevice *dev)
 	core_minor = core_version & SDCC_VERSION_MINOR_MASK;
 
 	log_debug("SDCC version %d.%d\n", core_major, core_minor);
+
+	/* Feature support depends on the SDCC core version. */
+	if (core_major == 1 && core_minor >= 0x42)
+		prv->use_14lpp_dll_reset = true;
+
+	if (core_major == 1 && core_minor >= 0x71)
+		prv->uses_tassadar_dll = true;
+
+	dev_read_u32(dev, "qcom,dll-config", &prv->dll_config);
 
 	/*
 	 * Support for some capabilities is not advertised by newer
@@ -283,6 +688,8 @@ static const struct msm_sdhc_variant_info msm_sdhc_mci_var = {
 	.mci_removed = false,
 
 	.core_dll_config = 0x100,
+	.core_dll_status = 0x108,
+	.core_dll_config_2 = 0x1b4,
 	.core_vendor_spec = 0x10c,
 	.core_vendor_spec_capabilities0 = 0x11c,
 };
@@ -291,6 +698,10 @@ static const struct msm_sdhc_variant_info msm_sdhc_v5_var = {
 	.mci_removed = true,
 
 	.core_dll_config = 0x200,
+	.core_dll_status = 0x208,
+	.core_dll_config_2 = 0x254,
+	.core_dll_config_3 = 0x258,
+	.core_dll_usr_ctl = 0x388,
 	.core_vendor_spec = 0x20c,
 	.core_vendor_spec_capabilities0 = 0x21c,
 };
