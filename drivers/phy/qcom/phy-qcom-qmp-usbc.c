@@ -166,6 +166,26 @@ struct qmp_phy_cfg {
 	int num_vregs;
 };
 
+static const char * const qcm2290_usb3_clk_l[] = {
+	"cfg_ahb", "ref", "com_aux",
+};
+
+static const struct qmp_phy_cfg qcm2290_usb3phy_cfg = {
+	.offsets	= &qmp_usbc_offsets_v3_qcm2290,
+	.serdes_tbl	= qcm2290_usb3_serdes_tbl,
+	.serdes_tbl_num	= ARRAY_SIZE(qcm2290_usb3_serdes_tbl),
+	.tx_tbl		= qcm2290_usb3_tx_tbl,
+	.tx_tbl_num	= ARRAY_SIZE(qcm2290_usb3_tx_tbl),
+	.rx_tbl		= qcm2290_usb3_rx_tbl,
+	.rx_tbl_num	= ARRAY_SIZE(qcm2290_usb3_rx_tbl),
+	.pcs_tbl	= qcm2290_usb3_pcs_tbl,
+	.pcs_tbl_num	= ARRAY_SIZE(qcm2290_usb3_pcs_tbl),
+	.clk_list	= qcm2290_usb3_clk_l,
+	.num_clks	= ARRAY_SIZE(qcm2290_usb3_clk_l),
+	.vreg_list	= NULL,
+	.num_vregs	= 0,
+};
+
 static const char * const shikra_usb3_clk_l[] = {
 	"cfg_ahb", "ref", "aux",
 };
@@ -517,6 +537,10 @@ static struct phy_ops qmp_usbc_usb_phy_ops = {
 };
 
 static const struct udevice_id qmp_usbc_of_match_table[] = {
+	{
+		.compatible = "qcom,qcm2290-qmp-usb3-phy",
+		.data = (ulong)&qcm2290_usb3phy_cfg,
+	},
 	{
 		.compatible = "qcom,shikra-qmp-usb3-dp-phy",
 		.data = (ulong)&shikra_usb3phy_cfg,
