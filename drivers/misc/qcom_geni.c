@@ -275,9 +275,15 @@ static int load_se_firmware(struct qup_se_rsc *rsc, bool elf, void *info)
 		return -EINVAL;
 	}
 
-	/* Program RAM address space. */
-	for (i = 0; i < hdr->fw_size_in_items; i++)
-		writel_relaxed(fw_val_arr[i], rsc->base + SE_GENI_CFG_RAMN + i * sizeof(u32));
+	/*
+	 * Program RAM address space. A minicore engine runs the protocol on
+	 * a hardware state machine and has no program RAM, so only the
+	 * register configuration of the ELF image applies to it.
+	 */
+	if (!elf || !(readl(rsc->base + SE_HW_PARAM_2) & GENI_USE_MINICORES))
+		for (i = 0; i < hdr->fw_size_in_items; i++)
+			writel_relaxed(fw_val_arr[i],
+				       rsc->base + SE_GENI_CFG_RAMN + i * sizeof(u32));
 
 	/* Put default values on GENI's output pads. */
 	writel_relaxed(0x1, rsc->base + GENI_FORCE_DEFAULT_REG);
@@ -454,9 +460,16 @@ static int geni_se_of_to_plat(struct udevice *dev)
 	struct resource res;
 	u32 proto;
 	struct geni_se_plat *plat = dev_get_plat(dev);
+	bool all_mini_cores = true, any_se = false;
 
 	plat->need_firmware_load = false;
 
+	/*
+	 * The built-in minicore settings replace the firmware image only if
+	 * every engine of the wrapper is a minicore. A wrapper can mix both
+	 * kinds (QCM2290: SE0/SE1 have program RAM, SE2-SE5 are minicores),
+	 * and then the engines are loaded from the firmware partition.
+	 */
 	dev_for_each_subnode(child, dev) {
 		if (!ofnode_is_enabled(child))
 			continue;
@@ -471,9 +484,12 @@ static int geni_se_of_to_plat(struct udevice *dev)
 		if (proto == GENI_SE_INVALID_PROTO)
 			plat->need_firmware_load = true;
 
-		if (readl(res.start + SE_HW_PARAM_2) & GENI_USE_MINICORES)
-			plat->is_mini_core = true;
+		any_se = true;
+		if (!(readl(res.start + SE_HW_PARAM_2) & GENI_USE_MINICORES))
+			all_mini_cores = false;
 	}
+
+	plat->is_mini_core = any_se && all_mini_cores;
 
 	return 0;
 }
@@ -577,7 +593,7 @@ static int qcom_geni_fw_initialise(void)
 		return 0;
 	}
 
-	if (plat->is_mini_core) {
+	if (IS_ENABLED(CONFIG_QCOM_GENI_MINICORE) && plat->is_mini_core) {
 		fw_buf = qup_mini_cores;
 		goto mini_core;
 	}
