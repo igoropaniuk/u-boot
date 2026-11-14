@@ -329,15 +329,16 @@ static int geni_i2c_disable_clocks(struct udevice *dev, struct geni_i2c_priv *ge
 {
 	int ret;
 
+	/* -ENOSYS: the clock driver has no disable operation */
 	if (geni->is_master_hub) {
 		ret = clk_disable(&geni->core);
-		if (ret) {
+		if (ret && ret != -ENOSYS) {
 			dev_err(dev, "clk_disable core failed %d\n", ret);
 		}
 	}
 
 	ret = clk_disable(&geni->se);
-	if (ret) {
+	if (ret && ret != -ENOSYS) {
 		dev_err(dev, "clk_disable se failed %d\n", ret);
 	}
 
