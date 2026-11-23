@@ -674,7 +674,8 @@ static int sd_send_op_cond(struct mmc *mmc, bool uhs_en)
 		cmd.resp_type = MMC_RSP_R1;
 		cmd.cmdarg = 0;
 
-		err = mmc_send_cmd(mmc, &cmd, NULL);
+		err = mmc_send_cmd_quirks(mmc, &cmd, NULL,
+					  MMC_QUIRK_RETRY_APP_CMD, 3);
 
 		if (err)
 			return err;
