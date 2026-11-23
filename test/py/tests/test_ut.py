@@ -13,6 +13,7 @@ import os
 import struct
 import os.path
 import re
+import filelock
 import pytest
 
 import utils
@@ -20,6 +21,9 @@ import utils
 from tests import fs_helper
 from fs_helper import DiskHelper, FsHelper
 from test_android.android_image import setup_android_image
+
+# Set once this process has set up the disk images used by the bootstd tests
+bootstd_images_done = False
 
 def mkdir_cond(dirname):
     """Create a directory if it doesn't already exist
@@ -622,11 +626,12 @@ def setup_rauc_image(ubman, mmc_dev, part_names=None):
     boot.cleanup()
     root.cleanup()
 
-@pytest.mark.buildconfigspec('cmd_bootflow')
-@pytest.mark.buildconfigspec('sandbox')
-def test_ut_dm_init_bootstd(ubman):
-    """Initialise data for bootflow tests"""
+def setup_bootstd_images(ubman):
+    """Create the disk images used by the bootstd tests
 
+    Args:
+        ubman (ConsoleBase): U-Boot fixture
+    """
     setup_fedora_image(ubman, 1, 'mmc')
     setup_bootmenu_image(ubman)
     setup_cedit_file(ubman)
@@ -640,16 +645,64 @@ def test_ut_dm_init_bootstd(ubman):
     # Restart so that the new mmc1.img is picked up
     ubman.restart_uboot()
 
+def ensure_bootstd_images(ubman, required):
+    """Create the disk images used by the bootstd tests, once per run
+
+    Parallel workers share the image files: the first one creates them and
+    the others wait for it, so that no worker overwrites images that another
+    one is using.
+
+    Args:
+        ubman (ConsoleBase): U-Boot fixture
+        required (bool): True to raise an exception if the images cannot be
+            created, False to only log it
+    """
+    global bootstd_images_done
+
+    if bootstd_images_done:
+        return
+    try:
+        if not os.environ.get('PYTEST_XDIST_WORKER'):
+            setup_bootstd_images(ubman)
+        else:
+            # conftest.py removes the done file when a parallel run starts
+            build_dir = ubman.config.build_dir
+            done = os.path.join(build_dir, 'bootstd-images.done')
+            with filelock.FileLock(os.path.join(build_dir,
+                                                'bootstd-images.lock')):
+                if not os.path.exists(done):
+                    setup_bootstd_images(ubman)
+                    open(done, 'w').close()
+    except Exception as exc:  # pylint: disable=W0703
+        if required:
+            raise
+        ubman.log.warning(f'Cannot create the bootstd images: {exc}')
+    bootstd_images_done = True
+
+@pytest.mark.buildconfigspec('cmd_bootflow')
+@pytest.mark.buildconfigspec('sandbox')
+def test_ut_dm_init_bootstd(ubman):
+    """Initialise data for bootflow tests"""
+
+    ensure_bootstd_images(ubman, True)
+
 
 @pytest.fixture(name="ut_ubman")
 def ut_ubman_fixture(ubman, ut_subtest):
-    """Fixture to restart the sandbox after known problematic tests.
+    """Fixture to create the images a test needs and to restart the sandbox
+    after known problematic tests.
 
     Args:
         ubman (ConsoleBase): U-Boot console
         ut_subtest (str): test to be executed via command ut, e.g 'foo bar' to
             execute command 'ut foo bar'
     """
+
+    # test_ut_dm_init_bootstd() is not selected when a test is run on its own
+    # with -k. Most bootstd tests don't use the images, so if they cannot be
+    # created (e.g. a host tool is missing), let the test run anyway
+    if ut_subtest.startswith('bootstd '):
+        ensure_bootstd_images(ubman, False)
 
     yield ubman
 

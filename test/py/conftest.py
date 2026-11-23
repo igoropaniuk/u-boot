@@ -208,7 +208,7 @@ def get_details(config):
             build_dir_extra, source_dir)
 
 def pytest_xdist_setupnodes(config, specs):
-    """Clear out any 'done' file from a previous build"""
+    """Clear out any 'done' file from a previous build or run"""
     global build_done_file
 
     build_dir = get_details(config)[3]
@@ -216,6 +216,11 @@ def pytest_xdist_setupnodes(config, specs):
     build_done_file = Path(build_dir) / 'build.done'
     if build_done_file.exists():
         os.remove(build_done_file)
+
+    # Disk images of the bootstd tests, see ensure_bootstd_images()
+    images_done_file = Path(build_dir) / 'bootstd-images.done'
+    if images_done_file.exists():
+        os.remove(images_done_file)
 
 def pytest_configure(config):
     """pytest hook: Perform custom initialization at startup time.
