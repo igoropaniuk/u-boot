@@ -346,6 +346,19 @@ static int sdhci_send_command(struct mmc *mmc, struct mmc_cmd *cmd,
 	if (host->quirks & SDHCI_QUIRK_WAIT_SEND_CMD)
 		udelay(1000);
 
+	/*
+	 * A response without CRC (R3) can leave a latent response CRC error
+	 * in the controller a few SD clock cycles after the command has
+	 * completed. It is not visible in the interrupt status, but unless
+	 * the status is cleared after it has settled, the next command that
+	 * checks the CRC fails with it at once (seen on Qualcomm SDHCI). Give
+	 * it a few clock periods before the final clear below. Such commands
+	 * are only sent while the card is being identified.
+	 */
+	if (!ret && (cmd->resp_type & MMC_RSP_PRESENT) &&
+	    !(cmd->resp_type & MMC_RSP_CRC) && mmc->clock)
+		udelay(DIV_ROUND_UP(16 * 1000000U, mmc->clock));
+
 	stat = sdhci_readl(host, SDHCI_INT_STATUS);
 	sdhci_writel(host, SDHCI_INT_ALL_MASK, SDHCI_INT_STATUS);
 	if (!ret) {
