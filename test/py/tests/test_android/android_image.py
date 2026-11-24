@@ -25,7 +25,11 @@ def create_gpt_image(ubman, mmc_dev, required_parts, images):
     """
     Partition = collections.namedtuple('part', 'start,size,name')
     parts = {}
-    fname = os.path.join(ubman.config.source_dir, f'mmc{mmc_dev}.img')
+    # Build the image under another name and rename it at the end, so that
+    # a test using the image never sees it half written
+    dest = os.path.join(ubman.config.source_dir, f'mmc{mmc_dev}.img')
+    fname = os.path.join(ubman.config.source_dir,
+                         f'mmc{mmc_dev}-{os.getpid()}.tmp.img')
     utils.run_and_log(ubman, f'qemu-img create {fname} 20M')
     utils.run_and_log(ubman, f'cgpt create {fname}')
 
@@ -67,6 +71,7 @@ def create_gpt_image(ubman, mmc_dev, required_parts, images):
 
     with open(fname, 'wb') as outf:
         outf.write(disk_data)
+    os.replace(fname, dest)
 
 def setup_android_v4_image(ubman):
     """Create mmc7.img: boot image v4 with vendor_boot partitions."""
